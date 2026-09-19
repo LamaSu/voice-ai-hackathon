@@ -67,6 +67,12 @@ async def memory():
     return shared.memory.to_ui() if shared else {}
 
 
+@app.post("/api/memory/reset")
+async def reset_memory():
+    """Forget everyone (names, voice profiles, facts, summary) — works with or without a call."""
+    return await shared.reset_all() if shared else {}
+
+
 @app.post("/api/offer")
 async def offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
     async def on_connection(connection: SmallWebRTCConnection):

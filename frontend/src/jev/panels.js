@@ -72,7 +72,8 @@ export function mountJevPanels(client, root) {
   const spProbs = el("div", "probs");
   const spPartial = el("div", "partial");
   const spBot = el("div", "bot-line");
-  speaker.append(spHead, spMeta, spEnergy, spProbs, spPartial, spBot);
+  const spVision = el("div", "vision-line", "vision → Jev: waiting for camera…");
+  speaker.append(spHead, spMeta, spEnergy, spProbs, spPartial, spBot, spVision);
 
   // ---- Jev panels ------------------------------------------------------------
   const overlap = el("div", "panel jev-decision");
@@ -113,20 +114,40 @@ export function mountJevPanels(client, root) {
   const memHead = el("div", "mem-head");
   memHead.append(el("h2", null, "Memory · people & conversation"));
   const forget = el("button", "ghost", "Forget everyone");
-  forget.addEventListener("click", () => {
-    try {
-      client.sendClientMessage("reset_memory", {});
-    } catch (e) {
-      console.warn(e);
-    }
-  });
+  forget.addEventListener("click", () => clearAllMemory());
   memHead.append(forget);
+
+  // Prominent header button: wipe every person (names, voice profiles, facts) and the summary.
+  // Uses the REST endpoint, so it also works when no call is connected.
+  const headerClear = el("button", "danger", "Clear all people & memory");
+  headerClear.title = "Forget all names, voice profiles, facts and the conversation summary";
+  headerClear.addEventListener("click", () => clearAllMemory());
+  document.querySelector(".bar-right")?.prepend(headerClear);
+
+  async function clearAllMemory() {
+    if (!confirm("Forget everyone? This deletes all names, voice profiles, facts and the conversation summary.")) return;
+    headerClear.disabled = forget.disabled = true;
+    try {
+      const res = await fetch("/api/memory/reset", { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      renderMemory(await res.json());
+      spName.textContent = "—";
+      spMeta.textContent = "memory cleared · 0 voice profiles";
+      spProbs.innerHTML = "";
+      logLine("memory cleared — everyone forgotten", "act-drop");
+    } catch (e) {
+      alert(`Could not clear memory: ${e.message ?? e}`);
+    } finally {
+      headerClear.disabled = forget.disabled = false;
+    }
+  }
   const people = el("ul", "people");
   people.append(el("li", "empty", "Nobody introduced yet. Say “Hi, I'm …”"));
   const summary = el("p", "summary", "");
   mem.append(memHead, people, el("h3", null, "Conversation summary"), summary);
 
   root.append(speaker, overlap, eot, tl, mem);
+  fetch("/api/memory").then((r) => (r.ok ? r.json() : null)).then((m) => m && renderMemory(m)).catch(() => {});
 
   // ---- state for the timeline -----------------------------------------------
   let serverNow = 0; // latest server monotonic time seen
@@ -159,6 +180,11 @@ export function mountJevPanels(client, root) {
     for (const [k, p] of entries) spProbs.append(bar(k, p, { highlight: k === sp.label }));
     spPartial.textContent = s.partial ? `“${s.partial}”` : "";
     spBot.textContent = s.bot_speaking && s.bot_sentence ? `bot: ${s.bot_sentence}` : "";
+    const v = s.vision || {};
+    spVision.textContent = v.enabled
+      ? `vision → Jev (server): ${v.looking_at_agent ? "looking at agent" : "looking away"} · confusion ${Number(v.confusion_p || 0).toFixed(2)} · wants turn ${v.wants_turn ? "yes" : "no"} · nod ${v.nod || 0}`
+      : "vision → Jev: no user_state received yet";
+    spVision.classList.toggle("on", !!v.enabled);
     if (s.bot_speaking !== botSpeaking) {
       botSpeaking = s.bot_speaking;
       segPush(botSegs, botSpeaking, t);

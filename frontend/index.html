@@ -19,7 +19,12 @@
 
       <section class="grid">
         <div class="panel video-panel">
-          <video id="cam" autoplay playsinline muted></video>
+          <!-- Lane A: face mesh + gaze overlay (src/jev/face.js on lane C's src/gaze tracker) -->
+          <div class="cam-wrap">
+            <video id="cam" autoplay playsinline muted></video>
+            <canvas id="faceOverlay" class="face-overlay"></canvas>
+          </div>
+          <div id="faceReadout" class="face-readout"></div>
           <!-- The bot's voice. Without this element the audio track arrives over
                WebRTC and is never played, so the agent looks alive in the
                transcript and is silent in the room. -->

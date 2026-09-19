@@ -35,10 +35,11 @@ from app.jev.client import JevClient, JevResult, NullJev
 from app.observers.latency_hud import LatencyHUD
 from app.memory.store import MemoryLLM, MemoryStore
 from app.perception.bot_tap import BotTap
-from app.perception.speaker_id import SpeakerIdProcessor
+from app.perception.speaker_id import SpeakerIdProcessor, new_speaker_memory
 from app.perception.vision import apply_gaze, apply_user_state
 from app.services import SYSTEM_PROMPT, make_llm, make_stt, make_tts
 from app.state.engine import StateEngine
+from app.state.interaction_state import ConversationState, SpeakerState
 from app.turns.controller import InteractionController
 from app.turns.policy import is_introduction
 
@@ -54,8 +55,22 @@ class SharedResources:
             self.settings.general_compute_base_url,
             self.settings.llm_model,
         )
+        self.speakers = new_speaker_memory(self.memory)  # shared by all sessions
+        self.sessions: set = set()  # per-session async reset callbacks
         self._embedder = None
         self._embedder_lock = threading.Lock()
+
+    async def reset_all(self) -> dict:
+        """Wipe people + voice profiles + summary, and reset every live session's context."""
+        self.memory.clear()
+        self.speakers = new_speaker_memory()
+        for reset in list(self.sessions):
+            try:
+                await reset()
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"session reset failed: {e}")
+        logger.info("memory: cleared all people, voice profiles and summary")
+        return self.memory.to_ui()
 
     def embedder(self):
         with self._embedder_lock:
@@ -154,6 +169,7 @@ def build_session(
         enabled=s.enable_speaker_id,
         embedder_factory=shared.embedder,
         on_memory_changed=publish_memory,
+        speakers=shared.speakers,
     )
     stt = make_stt(s)
     controller = InteractionController(
@@ -215,15 +231,7 @@ def build_session(
         elif msg.type == "gaze" and isinstance(msg.data, dict):
             apply_gaze(engine, msg.data)
         elif msg.type == "reset_memory":
-            memory.people.clear()
-            memory.profiles = []
-            memory.summary = ""
-            from app.perception.speaker_id import MEMORY_PARAMS
-            from app.perception.whospeaks.speaker_embedding_cluster import SpeakerMemory
-
-            speaker.speakers = SpeakerMemory(**MEMORY_PARAMS)
-            memory.save()
-            await publish_memory()
+            await shared.reset_all()
 
     @assistant_agg.event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn_stopped(aggregator, message):
@@ -245,8 +253,21 @@ def build_session(
         logger.info(f"session {session_id}: client disconnected")
         await worker.cancel()
 
+    async def reset_session() -> None:
+        speaker.speakers = shared.speakers
+        speaker.reset()
+        context.set_messages([{"role": "system", "content": SYSTEM_PROMPT}])
+        engine.state.speaker = SpeakerState()
+        engine.state.conversation = ConversationState()
+        await publish_memory()
+        await engine.publish("interaction", event="memory_cleared")
+        await engine.publish_snapshot(force=True)
+
+    shared.sessions.add(reset_session)
+
     @worker.event_handler("on_pipeline_finished")
     async def on_finished(worker, frame):
+        shared.sessions.discard(reset_session)
         log_fh.close()
         await jev.aclose()
 

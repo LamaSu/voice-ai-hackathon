@@ -57,6 +57,17 @@ MEMORY_PARAMS = dict(
 )
 
 
+def new_speaker_memory(memory: MemoryStore | None = None) -> SpeakerMemory:
+    """A SpeakerMemory with our params, restored from persisted voice profiles if any."""
+    speakers = SpeakerMemory(**MEMORY_PARAMS)
+    if memory is not None and memory.profiles:
+        try:
+            speakers.replace_profiles(memory.profiles)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"could not restore voice profiles: {e}")
+    return speakers
+
+
 def display_probabilities(decision: SpeakerDecision) -> dict[str, float]:
     """SpeakerMemory keys probabilities as 'speakerN'; map them to labels 'SN'."""
     out = {}
@@ -74,6 +85,7 @@ class SpeakerIdProcessor(FrameProcessor):
         enabled: bool = True,
         embedder_factory: Callable[[], object] | None = None,
         on_memory_changed: Callable[[], Awaitable[None]] | None = None,
+        speakers: SpeakerMemory | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -83,12 +95,9 @@ class SpeakerIdProcessor(FrameProcessor):
         self._embedder_factory = embedder_factory
         self._embedder = None
         self._on_memory_changed = on_memory_changed
-        self.speakers = SpeakerMemory(**MEMORY_PARAMS)
-        if memory.profiles:
-            try:
-                self.speakers.replace_profiles(memory.profiles)
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"could not restore voice profiles: {e}")
+        # One SpeakerMemory shared by every session (pass `speakers`), so concurrent sessions
+        # never overwrite each other's voice profiles or reuse labels.
+        self.speakers = speakers if speakers is not None else new_speaker_memory(memory)
         self._buf = np.zeros(int(SR * BUFFER_S), dtype=np.float32)
         self._written = 0  # total samples ever written
         self._utt_start: int | None = None
@@ -146,6 +155,11 @@ class SpeakerIdProcessor(FrameProcessor):
         if self._embedder is None:
             return None
         return await asyncio.to_thread(self._embedder.embed, audio)  # type: ignore[attr-defined]
+
+    def reset(self) -> None:
+        """Forget in-flight speaker state (after a memory wipe)."""
+        self._unknown_tail = None
+        self._utt_start = None
 
     def _apply(self, decision: SpeakerDecision, source: str) -> None:
         sp = self._engine.state.speaker

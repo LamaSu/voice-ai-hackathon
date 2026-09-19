@@ -349,3 +349,33 @@ async def test_null_jev_uses_deterministic_fallbacks():
     assert names(down)[-1] == "ProposedUserStoppedSpeakingFrame"
     jev = [e for e in events if e["type"] == "jev"]
     assert jev[-1]["decision"]["reason"].startswith("fallback")
+
+
+async def test_reset_all_clears_people_profiles_and_sessions(tmp_path):
+    import numpy as np
+
+    from app.bot import SharedResources
+    from app.config import get_settings
+    from app.memory.store import MemoryStore
+
+    shared = SharedResources.__new__(SharedResources)
+    shared.settings = get_settings()
+    shared.memory = MemoryStore(tmp_path / "m.json")
+    from app.perception.speaker_id import new_speaker_memory
+
+    shared.memory.set_name("S1", "Priya")
+    shared.memory.summary = "Priya likes cats."
+    shared.speakers = new_speaker_memory(shared.memory)
+    shared.speakers.add_profile(np.ones(192, dtype=np.float32), 3.0)
+    shared.sessions = set()
+    called = []
+
+    async def fake_session_reset():
+        called.append(True)
+
+    shared.sessions.add(fake_session_reset)
+    ui = await shared.reset_all()
+    assert ui == {"people": [], "summary": ""}
+    assert shared.speakers.profile_count() == 0
+    assert called == [True]
+    assert MemoryStore(tmp_path / "m.json").people == {}

@@ -71,6 +71,14 @@ class MemoryStore:
         )
         tmp.replace(self.path)
 
+    def clear(self) -> None:
+        """Forget everyone: names, facts, voice profiles and the conversation summary."""
+        self.people.clear()
+        self.profiles = []
+        self.summary = ""
+        self.pending_name = None
+        self.save()
+
     # ---------- people ----------
     def person(self, label: str) -> Person:
         if label not in self.people:

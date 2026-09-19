@@ -12,6 +12,7 @@ import { SmallWebRTCTransport } from "@pipecat-ai/small-webrtc-transport";
 
 import { LatencyHUD } from "./hud.js";
 import { mountJevPanels } from "./jev/panels.js";
+import { startFaceTracking } from "./jev/face.js";
 import { MSG_METRICS } from "./contracts.js";
 
 const hud = new LatencyHUD(document);
@@ -88,8 +89,21 @@ els.camToggle.addEventListener("change", (e) => {
   if (!e.target.checked) els.cam.srcObject = null;
 });
 
+let faceTracking = null;
+
 function showLocalVideo(track) {
   els.cam.srcObject = new MediaStream([track]);
+  // Lane C's tracker runs on this same preview; only Contract 1 numbers reach the bot.
+  faceTracking ??= startFaceTracking({
+    video: els.cam,
+    overlay: document.getElementById("faceOverlay"),
+    readout: document.getElementById("faceReadout"),
+    send: (state) => {
+      if (!client.connected) return false;
+      client.sendClientMessage("user_state", state);
+      return true;
+    },
+  });
 }
 
 function playBotAudio(track) {

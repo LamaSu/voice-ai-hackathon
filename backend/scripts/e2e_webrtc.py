@@ -249,9 +249,14 @@ async def main() -> int:
             print("[4] barge-in 'Actually, can you make it about a cat instead?'")
             n_before = len(events)
             t_i0, t_i1 = await say("interrupt")
-            await asyncio.sleep(0.8)
+
+            def int_events():
+                return [e for e in events[n_before:] if e.get("type") == "interaction" and e.get("event") == "interrupt"]
+
+            await wait_until(lambda: bool(int_events()), 4.0)  # tolerate provider jitter
+            await asyncio.sleep(0.5)
             stopped_at = ear.silent_since(t_i0, hold=0.4)
-            int_events = [e for e in events[n_before:] if e.get("type") == "interaction" and e.get("event") == "interrupt"]
+            int_events = int_events()
             if int_events:
                 results["interrupt_decision_after_speech_start_s"] = round(int_events[0]["_rx"] - t_i0, 2)
                 results["interrupt_reason"] = int_events[0].get("reason")
@@ -306,6 +311,10 @@ async def main() -> int:
             print(f"{k}: {v}")
     print("\nFAILURES:" if failures else "\nALL CHECKS PASSED", *failures, sep="\n  - ")
     await pc.close()
+    if not args.keep_memory:
+        # don't leave the test's fake people (Priya, Marcus) in the real memory
+        async with httpx.AsyncClient(timeout=10) as http:
+            await http.post(f"{args.url}/api/memory/reset")
     return 1 if failures else 0
 
 
