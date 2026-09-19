@@ -86,7 +86,11 @@ els.unmute.addEventListener("click", () => {
 els.mic.addEventListener("change", (e) => client.enableMic(e.target.checked));
 els.camToggle.addEventListener("change", (e) => {
   client.enableCam(e.target.checked);
-  if (!e.target.checked) els.cam.srcObject = null;
+  if (!e.target.checked) {
+    els.cam.srcObject = null;
+    faceTracking?.stop();
+    faceTracking = null;
+  }
 });
 
 let faceTracking = null;
@@ -94,6 +98,9 @@ let faceTracking = null;
 function showLocalVideo(track) {
   els.cam.srcObject = new MediaStream([track]);
   // Lane C's tracker runs on this same preview; only Contract 1 numbers reach the bot.
+  // Lane C (#8) + lane A overlay: MediaPipe runs on the camera track we already
+  // opened, and only numbers leave the page. Failure is non-fatal — without it the
+  // agent loses the confusion prior and still converses (see startFaceTracking).
   faceTracking ??= startFaceTracking({
     video: els.cam,
     overlay: document.getElementById("faceOverlay"),

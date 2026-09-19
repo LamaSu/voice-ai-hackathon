@@ -1,7 +1,15 @@
 import pytest
 
 from app.jev.client import JevResult
-from app.turns.policy import Action, decide_end_of_turn, decide_overlap, is_hard_stop, is_introduction
+from app.turns.policy import (
+    Action,
+    ConfusionTracker,
+    decide_end_of_turn,
+    decide_overlap,
+    decide_probe,
+    is_hard_stop,
+    is_introduction,
+)
 
 
 def overlap_result(intent, conf, wants_floor=0.2, correcting=0.1, addressed=0.8):
@@ -73,3 +81,43 @@ def test_introduction():
     assert is_introduction(eot_result("respond_now", 0.9, 0.9, intro=0.9))
     assert not is_introduction(eot_result("respond_now", 0.9, 0.9, intro=0.2))
     assert not is_introduction(None)
+
+
+# --- Confusion probe (B2, #5) -----------------------------------------------
+
+
+def test_confusion_tracker_counts_consecutive_high_samples():
+    tracker = ConfusionTracker()
+    assert tracker.observe(0.7) == 1
+    assert tracker.observe(0.65) == 2
+    assert tracker.observe(0.2) == 0  # a low reading resets the streak
+    assert tracker.observe(0.9) == 1
+
+
+def test_confusion_tracker_reset():
+    tracker = ConfusionTracker()
+    tracker.observe(0.9)
+    tracker.observe(0.9)
+    tracker.reset()
+    assert tracker.observe(0.9) == 1
+
+
+@pytest.mark.parametrize(
+    "confusion_p,consecutive_high,bot_speaking,already_probing,expected,reason",
+    [
+        (0.3, 5, True, False, Action.CONTINUE, "confusion_below_threshold"),
+        (0.7, 1, True, False, Action.CONTINUE, "confusion_not_sustained"),
+        (0.7, 3, False, False, Action.CONTINUE, "not_mid_explanation"),
+        (0.7, 3, True, True, Action.CONTINUE, "probe_already_in_flight"),
+        (0.7, 3, True, False, Action.PROBE, "sustained_confusion"),
+    ],
+)
+def test_decide_probe(confusion_p, consecutive_high, bot_speaking, already_probing, expected, reason):
+    decision = decide_probe(
+        confusion_p,
+        consecutive_high=consecutive_high,
+        bot_speaking=bot_speaking,
+        already_probing=already_probing,
+    )
+    assert decision.action == expected
+    assert decision.reason == reason

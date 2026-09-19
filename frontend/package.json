@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "typecheck": "tsc -b",
     "predev": "node scripts/fetch-mediapipe.mjs",
     "prebuild": "node scripts/fetch-mediapipe.mjs"
   },
@@ -17,8 +18,8 @@
     "@pipecat-ai/small-webrtc-transport": "^1.10.8"
   },
   "devDependencies": {
-    "typescript": "^5.9.3",
+    "typescript": "^5.5.4",
     "vite": "^7.1.5",
-    "vitest": "^2.1.9"
+    "vitest": "^2.0.5"
   }
 }
