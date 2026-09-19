@@ -37,7 +37,7 @@ from app.fillers import FillerLibrary
 from app.memory.store import MemoryLLM, MemoryStore, regex_name
 from app.perception.bot_tap import BotTap
 from app.perception.speaker_id import SpeakerIdProcessor, new_speaker_memory
-from app.perception.vision import apply_gaze, apply_user_state
+from app.perception.vision import apply_faces, apply_gaze, apply_user_state
 from app.services import SYSTEM_PROMPT, make_llm, make_stt, make_tts
 from app.state.engine import StateEngine
 from app.state.interaction_state import ConversationState, SpeakerState
@@ -171,6 +171,14 @@ def build_session(
         name = await shared.memory_llm.extract_name(text)
         if not name:
             return
+        if not speaker_label:
+            # ECAPA classifies the utterance just after the VAD stop; on a first, short
+            # introduction the label can land a moment after the turn is accepted.
+            for _ in range(8):
+                await asyncio.sleep(0.1)
+                speaker_label = engine.state.speaker.label
+                if speaker_label:
+                    break
         if speaker_label:
             memory.set_name(speaker_label, name)
             if engine.state.speaker.label == speaker_label:
@@ -182,7 +190,7 @@ def build_session(
         await publish_memory()
 
     vad = VADProcessor(
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(start_secs=0.15, stop_secs=0.3, confidence=0.7, min_volume=0.5))
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(start_secs=0.12, stop_secs=0.2, confidence=0.7, min_volume=0.5))
     )
     speaker = SpeakerIdProcessor(
         engine,
@@ -253,6 +261,8 @@ def build_session(
     async def on_client_message(rtvi, msg):
         if msg.type == "user_state" and isinstance(msg.data, dict):
             apply_user_state(engine, msg.data)  # Contract 1 (lane C)
+        elif msg.type == "faces" and isinstance(msg.data, dict):
+            apply_faces(engine, msg.data)  # per-face gaze for everyone in frame
         elif msg.type == "gaze" and isinstance(msg.data, dict):
             apply_gaze(engine, msg.data)
         elif msg.type == "reset_memory":

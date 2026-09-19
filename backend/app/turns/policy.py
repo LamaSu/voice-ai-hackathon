@@ -36,12 +36,12 @@ class PolicyConfig:
     turn_complete_strong: float = 0.85
     respond_prob: float = 0.35  # p(respond_now) needed when Jev's top choice is wait_for_more
     ignore_conf: float = 0.6
-    hold_max_silence_s: float = 2.0
+    hold_max_silence_s: float = 1.1
     fallback_respond_silence_s: float = 0.8
     introducing_self: float = 0.6
     # Jev spreads probability across the filler styles (any of them would be fine), so the
     # decision is "is silence right?" (p(none)), not the top style's confidence.
-    filler_none_max: float = 0.4
+    filler_none_max: float = 0.6
     filler_min_prob: float = 0.15
     confusion_threshold: float = 0.6  # confusion_p (Contract 1) at/above this counts as "high"
     confusion_confirm_samples: int = 3  # consecutive high samples (~300ms at 10Hz) before acting

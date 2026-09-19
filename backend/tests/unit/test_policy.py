@@ -143,7 +143,10 @@ def filler_result(probs):
     "probs,expected",
     [
         ({"none": 0.87, "acknowledging": 0.12, "thinking": 0.01}, None),  # a command: stay silent
-        ({"none": 0.45, "acknowledging": 0.51, "thinking": 0.04}, None),  # silence plausible
+        # silence is plausible but not likely: speak, because hearing something at ~0.3s
+        # beats hearing nothing for ~1.2s (filler_none_max = 0.6)
+        ({"none": 0.45, "acknowledging": 0.51, "thinking": 0.04}, "acknowledging"),
+        ({"none": 0.65, "acknowledging": 0.3, "thinking": 0.05}, None),  # silence likely
         ({"none": 0.1, "weighing": 0.29, "acknowledging": 0.24, "thinking": 0.22}, "weighing"),
         ({"none": 0.2, "thinking": 0.05, "casual": 0.04}, None),  # no style stands out
     ],

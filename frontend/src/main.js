@@ -11,7 +11,7 @@ import { PipecatClient, RTVIEvent } from "@pipecat-ai/client-js";
 import { SmallWebRTCTransport } from "@pipecat-ai/small-webrtc-transport";
 
 import { LatencyHUD } from "./hud.js";
-import { mountJevPanels } from "./jev/panels.js";
+import { mountJevPanels, speakers } from "./jev/panels.js";
 import { startFaceTracking } from "./jev/face.js";
 import { MSG_METRICS } from "./contracts.js";
 
@@ -38,10 +38,11 @@ const client = new PipecatClient({
   callbacks: {
     onTransportStateChanged: (state) => setState(state),
     onBotReady: () => log("system", "bot ready"),
+    // Credit the recognized speaker and the agent by name, not "YOU"/"AGENT".
     onUserTranscript: (data) => {
-      if (data?.final) log("you", data.text);
+      if (data?.final) log(speakers.user, data.text, "you");
     },
-    onBotTranscript: (data) => log("agent", data?.text ?? ""),
+    onBotTranscript: (data) => log(speakers.bot, data?.text ?? "", "agent"),
     onError: (err) => log("error", String(err?.message ?? err)),
   },
 });
@@ -110,6 +111,9 @@ function showLocalVideo(track) {
       client.sendClientMessage("user_state", state);
       return true;
     },
+    sendFaces: (faces) => {
+      if (client.connected) client.sendClientMessage("faces", faces);
+    },
   });
 }
 
@@ -135,10 +139,10 @@ function setState(state) {
   els.connect.textContent = client.connected ? "Disconnect" : "Connect";
 }
 
-function log(who, text) {
+function log(who, text, kind = who) {
   if (!text) return;
   const li = document.createElement("li");
-  li.className = `log-${who}`;
+  li.className = `log-${kind}`;
   li.innerHTML = `<span class="who">${who}</span><span class="what"></span>`;
   li.querySelector(".what").textContent = text;
   els.log.append(li);

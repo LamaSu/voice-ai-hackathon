@@ -23,6 +23,9 @@ export interface GazeTrackerOptions {
   onResult?: (result: FaceLandmarkerResult, frame: RawFaceFrame) => void;
   wasmBaseUrl?: string;
   modelAssetPath?: string;
+  // How many faces to track (lane A: the room can hold more than one person).
+  // user_state (Contract 1) still describes one person: the largest face in frame.
+  numFaces?: number;
 }
 
 export interface GazeTracker {
@@ -64,7 +67,7 @@ export async function createGazeTracker(opts: GazeTrackerOptions): Promise<GazeT
       delegate: "GPU",
     },
     runningMode: "VIDEO",
-    numFaces: 1,
+    numFaces: opts.numFaces ?? 1,
     outputFaceBlendshapes: true,
     outputFacialTransformationMatrixes: true,
   });

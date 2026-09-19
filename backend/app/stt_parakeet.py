@@ -40,9 +40,9 @@ from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 
 DEFAULT_MODEL_DIR = Path(__file__).resolve().parent.parent / "models" / "parakeet-tdt-0.6b-v3"
-CHUNK_S = 0.24  # 0.16 saturates the GPU (RTF 0.85) and loses accuracy; 0.24 gives RTF ~0.55
+CHUNK_S = 0.2  # 0.16 saturates the GPU (RTF 0.85) and loses accuracy; 0.2 gives RTF ~0.65
 CONTEXT = (256, 256)
-FLUSH_PAD_S = 0.2  # models garble the last word when audio stops abruptly
+FLUSH_PAD_S = 0.12  # enough for the decoder to finish the last word, no more
 PREROLL_S = 0.3  # audio kept before VAD fires, so the first syllable isn't lost
 _FLUSH = object()
 
