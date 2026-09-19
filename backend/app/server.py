@@ -57,6 +57,7 @@ async def health():
     return {
         "ok": True,
         "llm_model": s.llm_model,
+        "stt": "gradium",
         "jev_model": s.jev_model if s.jev_api_key else None,
         "speaker_id": s.enable_speaker_id,
     }

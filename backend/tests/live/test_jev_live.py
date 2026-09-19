@@ -98,3 +98,26 @@ async def test_introduction_detected(jev):
     assert is_introduction(r), r.nouls
     r2 = await jev.ask(eot_state("What's the capital of France?", 0.4), END_OF_TURN_QUESTIONS)
     assert not is_introduction(r2), r2.nouls
+
+
+FILLER_CASES = [
+    ("Why do cats purr, actually? Is it always contentment?", {"weighing", "thinking"}),
+    ("Turn off the lights.", {None}),
+    ("What's two plus two?", {None, "acknowledging"}),
+    ("So I've been trying to decide between moving to Lisbon or staying in Berlin.", None),
+    ("Hi there, my name is Priya.", {None, "acknowledging"}),
+]
+
+
+@pytest.mark.parametrize("text,allowed", FILLER_CASES)
+async def test_filler_choice(jev, text, allowed):
+    from app.turns.policy import choose_filler
+
+    r = await jev.ask(eot_state(text, 0.4), END_OF_TURN_QUESTIONS)
+    pick = choose_filler(r)
+    probs = r.choices["filler"]["probabilities"]
+    top = sorted(probs.items(), key=lambda kv: -kv[1])[:3]
+    print(f"\n{text!r:62} -> {pick!r:16} {top}")
+    assert r.ok, r.error
+    if allowed is not None:
+        assert pick in allowed

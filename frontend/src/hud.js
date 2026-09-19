@@ -29,12 +29,16 @@ export function median(values) {
 export class LatencyHUD {
   constructor(root = document) {
     this.samples = [];
+    this.contentSamples = [];
     this.el = {
       latest: root.getElementById("latest"),
       median: root.getElementById("median"),
       best: root.getElementById("best"),
       worst: root.getElementById("worst"),
       count: root.getElementById("count"),
+      contentRow: root.getElementById("contentRow"),
+      latestContent: root.getElementById("latestContent"),
+      audioLabel: root.getElementById("audioLabel"),
       stages: root.getElementById("stages"),
       spark: root.getElementById("spark"),
     };
@@ -47,6 +51,20 @@ export class LatencyHUD {
 
     this.samples.push(ms);
     const grade = gradeFor(ms);
+
+    // Only show the second line once a filler has actually separated the two,
+    // so a run without fillers stays a single honest number.
+    const contentMs = payload.end_of_speech_to_first_content_ms;
+    const hasFiller = typeof contentMs === "number" && Math.round(contentMs) !== Math.round(ms);
+    if (hasFiller) {
+      this.contentSamples.push(contentMs);
+      this.el.latestContent.textContent = Math.round(contentMs);
+      this.el.latestContent.className = `latest-sub grade-${gradeFor(contentMs)}`;
+      this.el.contentRow.removeAttribute("hidden");
+      this.el.audioLabel.textContent = payload.filler
+        ? `to first audio (${payload.filler})`
+        : "to first audio";
+    }
 
     this.el.latest.textContent = Math.round(ms);
     this.el.latest.className = `latest grade-${grade}`;

@@ -36,3 +36,25 @@ def apply_user_state(engine: StateEngine, data: dict[str, Any]) -> None:
         top = sorted(((k, float(x)) for k, x in au.items() if isinstance(x, (int, float))), key=lambda kv: -abs(kv[1]))
         v.au = {k: round(x, 2) for k, x in top[:4]}
     v.updated_at = engine.now()
+
+
+def apply_faces(engine: StateEngine, data: dict[str, Any]) -> None:
+    """Per-face gaze for everyone in frame (lane A's `faces` message, ~5 Hz).
+
+    Contract 1 describes one person; this says how many people are present and how many
+    are looking at the agent, which is what separates "talking to me" from "talking to
+    each other".
+    """
+    v = engine.state.vision
+    v.enabled = True
+    v.face_count = int(data.get("count", 0) or 0)
+    v.faces_looking_at_agent = int(data.get("looking_at_agent", 0) or 0)
+    faces = data.get("faces") or []
+    v.faces = [f for f in faces if isinstance(f, dict)][:4]
+    v.face_present = v.face_count > 0
+    primary = next((f for f in v.faces if f.get("primary")), v.faces[0] if v.faces else None)
+    if primary:
+        v.looking_at_agent = bool(primary.get("looking_at_agent"))
+        v.head_yaw = float(primary.get("head_yaw", 0.0) or 0.0)
+        v.head_pitch = float(primary.get("head_pitch", 0.0) or 0.0)
+    v.updated_at = engine.now()

@@ -83,3 +83,10 @@ canvas#spark { width: 100%; height: 64px; margin-top: 14px; display: block; }
   font-size: 14px; font-weight: 600; cursor: pointer;
 }
 .unmute[hidden] { display: none; }
+
+.readout-label { color: var(--muted); font-size: 12px; margin-left: 8px; }
+.readout-sub { margin-top: 4px; }
+.latest-sub { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.latest-sub.grade-good { color: var(--good); }
+.latest-sub.grade-fair { color: var(--fair); }
+.latest-sub.grade-poor { color: var(--poor); }

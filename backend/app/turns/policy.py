@@ -32,13 +32,23 @@ class PolicyConfig:
     addressed_min: float = 0.3
     overlap_cap_s: float = 1.5
     overlap_cap_words: int = 3
+    # Cloud ASR delivers the first word ~0.9s late, so waiting for text to decide a barge-in
+    # feels sluggish. Speech that keeps going past this is longer than a backchannel
+    # ("yeah", "mm-hm", "right" are all shorter), so it interrupts on duration alone —
+    # unless Jev has already called this utterance a backchannel.
+    overlap_duration_s: float = 0.8
+    overlap_min_energy: float = 0.03  # ignore AEC residue of the bot's own voice
     turn_complete: float = 0.6
     turn_complete_strong: float = 0.85
     respond_prob: float = 0.35  # p(respond_now) needed when Jev's top choice is wait_for_more
     ignore_conf: float = 0.6
-    hold_max_silence_s: float = 2.0
-    fallback_respond_silence_s: float = 0.8
+    hold_max_silence_s: float = 1.1
+    fallback_respond_silence_s: float = 0.5
     introducing_self: float = 0.6
+    # Jev spreads probability across the filler styles (any of them would be fine), so the
+    # decision is "is silence right?" (p(none)), not the top style's confidence.
+    filler_none_max: float = 0.6
+    filler_min_prob: float = 0.15
     confusion_threshold: float = 0.6  # confusion_p (Contract 1) at/above this counts as "high"
     confusion_confirm_samples: int = 3  # consecutive high samples (~300ms at 10Hz) before acting
 
@@ -57,6 +67,15 @@ _HARD_STOP = re.compile(
 
 def is_hard_stop(text: str) -> bool:
     return bool(_HARD_STOP.search(text.strip()))
+
+
+def sustained_overlap_interrupt(
+    *, speech_s: float, energy: float, resolved_passive: bool, cfg: PolicyConfig = PolicyConfig()
+) -> bool:
+    """Barge-in on duration, before the transcript arrives."""
+    if resolved_passive:
+        return False
+    return speech_s >= cfg.overlap_duration_s and energy >= cfg.overlap_min_energy
 
 
 def decide_overlap(
@@ -128,6 +147,19 @@ def decide_end_of_turn(
     if complete >= cfg.turn_complete_strong:
         return Decision(Action.RESPOND, "turn_complete_strong")
     return Decision(Action.HOLD, f"incomplete:{complete:.2f}")
+
+
+def choose_filler(r: JevResult | None, cfg: PolicyConfig = PolicyConfig()) -> str | None:
+    """Which cached filler to play while the LLM generates, or None to stay silent."""
+    if not r or not r.ok or "filler" not in r.choices:
+        return None
+    probs = r.choices["filler"].get("probabilities") or {}
+    if not probs:
+        return None
+    if probs.get("none", 0.0) >= cfg.filler_none_max:
+        return None
+    category, p = max(((k, v) for k, v in probs.items() if k != "none"), key=lambda kv: kv[1], default=(None, 0.0))
+    return category if p >= cfg.filler_min_prob else None
 
 
 def is_introduction(r: JevResult | None, cfg: PolicyConfig = PolicyConfig()) -> bool:

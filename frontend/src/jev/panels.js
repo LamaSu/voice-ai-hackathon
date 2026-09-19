@@ -53,6 +53,10 @@ function bar(label, p, { threshold, highlight } = {}) {
   return row;
 }
 
+// Who the shell should credit for the next line of transcript: the recognized speaker
+// (ECAPA + memory) and the agent's own name, both from the server's state snapshots.
+export const speakers = { user: "you", bot: "agent" };
+
 export function mountJevPanels(client, root) {
   root.innerHTML = "";
   root.classList.add("jev-grid");
@@ -172,6 +176,8 @@ export function mountJevPanels(client, root) {
     spEnergyFill.style.width = `${Math.min(100, Math.round((s.user_energy || 0) * 100))}%`;
     const sp = s.speaker || {};
     spName.textContent = sp.name || sp.label || "unknown";
+    speakers.user = sp.name || sp.label || "you";
+    speakers.bot = s.bot_name || "agent";
     spMeta.textContent = sp.label
       ? `${sp.label} · ${Math.round((sp.confidence || 0) * 100)}% · ${sp.source} decision · ${sp.known_speakers} voice profile${sp.known_speakers === 1 ? "" : "s"}`
       : `${sp.known_speakers || 0} voice profiles · speak ≥1s to be recognized`;
@@ -182,7 +188,7 @@ export function mountJevPanels(client, root) {
     spBot.textContent = s.bot_speaking && s.bot_sentence ? `bot: ${s.bot_sentence}` : "";
     const v = s.vision || {};
     spVision.textContent = v.enabled
-      ? `vision → Jev (server): ${v.looking_at_agent ? "looking at agent" : "looking away"} · confusion ${Number(v.confusion_p || 0).toFixed(2)} · wants turn ${v.wants_turn ? "yes" : "no"} · nod ${v.nod || 0}`
+      ? `vision → Jev (server): ${v.face_count || 0} in frame, ${v.faces_looking_at_agent || 0} looking at agent · speaker ${v.looking_at_agent ? "at agent" : "away"} · confusion ${Number(v.confusion_p || 0).toFixed(2)} · wants turn ${v.wants_turn ? "yes" : "no"}`
       : "vision → Jev: no user_state received yet";
     spVision.classList.toggle("on", !!v.enabled);
     if (s.bot_speaking !== botSpeaking) {
@@ -264,6 +270,10 @@ export function mountJevPanels(client, root) {
         break;
       }
       case "interaction":
+        if (ev.event === "filler") {
+          logLine(`filler [${ev.category}] “${ev.text}” (${ev.duration_s}s, while the LLM thinks)`, "act-continue");
+          break;
+        }
         if (["interrupt", "backchannel", "drop", "introduction"].includes(ev.event)) {
           const who = ev.speaker ? `${ev.speaker}: ` : "";
           const txt = ev.event === "introduction" ? `${ev.name} introduced (${ev.speaker || "?"})` : `${ev.event} — ${who}${ev.text || ""}`;

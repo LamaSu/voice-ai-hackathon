@@ -44,6 +44,13 @@
           <h2>End of speech → first audio</h2>
           <div class="readout">
             <span id="latest" class="latest">—</span><span class="unit">ms</span>
+            <span id="audioLabel" class="readout-label">to first audio</span>
+          </div>
+          <!-- When a cached filler speaks first, "first audio" is the filler.
+               This second line is the one that means "the answer". -->
+          <div id="contentRow" class="readout readout-sub" hidden>
+            <span id="latestContent" class="latest-sub">—</span><span class="unit">ms</span>
+            <span class="readout-label">to the answer</span>
           </div>
           <dl class="stats">
             <div><dt>median</dt><dd id="median">—</dd></div>

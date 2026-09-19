@@ -1,0 +1,300 @@
+{
+ "voice": "_6Aslh2DxfmnRLmP",
+ "sample_rate": 48000,
+ "clips": [
+  {
+   "category": "thinking",
+   "text": "Hmm.",
+   "file": "thinking--hmm.wav",
+   "duration_s": 0.8
+  },
+  {
+   "category": "thinking",
+   "text": "Let me think about that.",
+   "file": "thinking--let-me-think-about-that.wav",
+   "duration_s": 1.44
+  },
+  {
+   "category": "thinking",
+   "text": "Let me think.",
+   "file": "thinking--let-me-think.wav",
+   "duration_s": 1.04
+  },
+  {
+   "category": "thinking",
+   "text": "Give me a sec.",
+   "file": "thinking--give-me-a-sec.wav",
+   "duration_s": 1.12
+  },
+  {
+   "category": "thinking",
+   "text": "Hang on.",
+   "file": "thinking--hang-on.wav",
+   "duration_s": 1.04
+  },
+  {
+   "category": "thinking",
+   "text": "Hold on.",
+   "file": "thinking--hold-on.wav",
+   "duration_s": 0.96
+  },
+  {
+   "category": "thinking",
+   "text": "Let's see...",
+   "file": "thinking--let-s-see.wav",
+   "duration_s": 1.28
+  },
+  {
+   "category": "thinking",
+   "text": "Okay, so...",
+   "file": "thinking--okay-so.wav",
+   "duration_s": 1.36
+  },
+  {
+   "category": "thinking",
+   "text": "Well...",
+   "file": "thinking--well.wav",
+   "duration_s": 0.8
+  },
+  {
+   "category": "thinking",
+   "text": "Um...",
+   "file": "thinking--um.wav",
+   "duration_s": 1.04
+  },
+  {
+   "category": "acknowledging",
+   "text": "That's interesting.",
+   "file": "acknowledging--that-s-interesting.wav",
+   "duration_s": 1.2
+  },
+  {
+   "category": "acknowledging",
+   "text": "Huh.",
+   "file": "acknowledging--huh.wav",
+   "duration_s": 0.88
+  },
+  {
+   "category": "acknowledging",
+   "text": "Oh, wow.",
+   "file": "acknowledging--oh-wow.wav",
+   "duration_s": 1.36
+  },
+  {
+   "category": "acknowledging",
+   "text": "Yeah...",
+   "file": "acknowledging--yeah.wav",
+   "duration_s": 0.96
+  },
+  {
+   "category": "acknowledging",
+   "text": "Right, right.",
+   "file": "acknowledging--right-right.wav",
+   "duration_s": 1.36
+  },
+  {
+   "category": "acknowledging",
+   "text": "I see.",
+   "file": "acknowledging--i-see.wav",
+   "duration_s": 0.88
+  },
+  {
+   "category": "acknowledging",
+   "text": "Got it.",
+   "file": "acknowledging--got-it.wav",
+   "duration_s": 0.88
+  },
+  {
+   "category": "acknowledging",
+   "text": "Fair enough.",
+   "file": "acknowledging--fair-enough.wav",
+   "duration_s": 1.04
+  },
+  {
+   "category": "acknowledging",
+   "text": "Mm-hm.",
+   "file": "acknowledging--mm-hm.wav",
+   "duration_s": 1.84
+  },
+  {
+   "category": "acknowledging",
+   "text": "Okay.",
+   "file": "acknowledging--okay.wav",
+   "duration_s": 0.88
+  },
+  {
+   "category": "weighing",
+   "text": "That's a good question.",
+   "file": "weighing--that-s-a-good-question.wav",
+   "duration_s": 1.52
+  },
+  {
+   "category": "weighing",
+   "text": "Good point.",
+   "file": "weighing--good-point.wav",
+   "duration_s": 1.04
+  },
+  {
+   "category": "weighing",
+   "text": "Interesting question.",
+   "file": "weighing--interesting-question.wav",
+   "duration_s": 1.44
+  },
+  {
+   "category": "weighing",
+   "text": "That's a tough one.",
+   "file": "weighing--that-s-a-tough-one.wav",
+   "duration_s": 1.28
+  },
+  {
+   "category": "weighing",
+   "text": "I hadn't thought of it that way.",
+   "file": "weighing--i-hadn-t-thought-of-it-that-way.wav",
+   "duration_s": 2.0
+  },
+  {
+   "category": "weighing",
+   "text": "That's fair.",
+   "file": "weighing--that-s-fair.wav",
+   "duration_s": 1.04
+  },
+  {
+   "category": "weighing",
+   "text": "It's funny you ask.",
+   "file": "weighing--it-s-funny-you-ask.wav",
+   "duration_s": 1.44
+  },
+  {
+   "category": "weighing",
+   "text": "Now that you mention it...",
+   "file": "weighing--now-that-you-mention-it.wav",
+   "duration_s": 1.6
+  },
+  {
+   "category": "reframing",
+   "text": "So what you're saying is...",
+   "file": "reframing--so-what-you-re-saying-is.wav",
+   "duration_s": 2.0
+  },
+  {
+   "category": "reframing",
+   "text": "If I'm hearing you right...",
+   "file": "reframing--if-i-m-hearing-you-right.wav",
+   "duration_s": 1.68
+  },
+  {
+   "category": "reframing",
+   "text": "So basically...",
+   "file": "reframing--so-basically.wav",
+   "duration_s": 1.68
+  },
+  {
+   "category": "reframing",
+   "text": "In other words...",
+   "file": "reframing--in-other-words.wav",
+   "duration_s": 1.6
+  },
+  {
+   "category": "reframing",
+   "text": "You mean...?",
+   "file": "reframing--you-mean.wav",
+   "duration_s": 1.12
+  },
+  {
+   "category": "nuance",
+   "text": "I mean...",
+   "file": "nuance--i-mean.wav",
+   "duration_s": 1.12
+  },
+  {
+   "category": "nuance",
+   "text": "Well, here's the thing...",
+   "file": "nuance--well-here-s-the-thing.wav",
+   "duration_s": 2.0
+  },
+  {
+   "category": "nuance",
+   "text": "The thing is...",
+   "file": "nuance--the-thing-is.wav",
+   "duration_s": 1.28
+  },
+  {
+   "category": "nuance",
+   "text": "To be honest...",
+   "file": "nuance--to-be-honest.wav",
+   "duration_s": 1.52
+  },
+  {
+   "category": "nuance",
+   "text": "I don't know...",
+   "file": "nuance--i-don-t-know.wav",
+   "duration_s": 1.52
+  },
+  {
+   "category": "nuance",
+   "text": "It depends.",
+   "file": "nuance--it-depends.wav",
+   "duration_s": 1.36
+  },
+  {
+   "category": "nuance",
+   "text": "Sort of, yeah.",
+   "file": "nuance--sort-of-yeah.wav",
+   "duration_s": 1.52
+  },
+  {
+   "category": "nuance",
+   "text": "Yes and no.",
+   "file": "nuance--yes-and-no.wav",
+   "duration_s": 1.36
+  },
+  {
+   "category": "casual",
+   "text": "Man...",
+   "file": "casual--man.wav",
+   "duration_s": 1.12
+  },
+  {
+   "category": "casual",
+   "text": "Oof.",
+   "file": "casual--oof.wav",
+   "duration_s": 0.96
+  },
+  {
+   "category": "casual",
+   "text": "Ooh.",
+   "file": "casual--ooh.wav",
+   "duration_s": 0.96
+  },
+  {
+   "category": "casual",
+   "text": "Dang.",
+   "file": "casual--dang.wav",
+   "duration_s": 0.88
+  },
+  {
+   "category": "casual",
+   "text": "Welp.",
+   "file": "casual--welp.wav",
+   "duration_s": 0.8
+  },
+  {
+   "category": "casual",
+   "text": "Ah.",
+   "file": "casual--ah.wav",
+   "duration_s": 0.88
+  },
+  {
+   "category": "casual",
+   "text": "Look...",
+   "file": "casual--look.wav",
+   "duration_s": 1.28
+  },
+  {
+   "category": "casual",
+   "text": "Listen...",
+   "file": "casual--listen.wav",
+   "duration_s": 1.2
+  }
+ ]
+}

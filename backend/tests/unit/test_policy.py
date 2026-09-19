@@ -132,3 +132,48 @@ def test_regex_name_is_the_fallback_when_jev_is_unavailable():
     assert regex_name("call me Akash") == "Akash"
     assert regex_name("What's the capital of Japan?") is None
     assert regex_name("I'm going to the shops") is None
+
+
+def filler_result(probs):
+    top = max(probs, key=probs.get)
+    return JevResult(choices={"filler": {"choice": top, "confidence": probs[top], "probabilities": probs}})
+
+
+@pytest.mark.parametrize(
+    "probs,expected",
+    [
+        ({"none": 0.87, "acknowledging": 0.12, "thinking": 0.01}, None),  # a command: stay silent
+        # silence is plausible but not likely: speak, because hearing something at ~0.3s
+        # beats hearing nothing for ~1.2s (filler_none_max = 0.6)
+        ({"none": 0.45, "acknowledging": 0.51, "thinking": 0.04}, "acknowledging"),
+        ({"none": 0.65, "acknowledging": 0.3, "thinking": 0.05}, None),  # silence likely
+        ({"none": 0.1, "weighing": 0.29, "acknowledging": 0.24, "thinking": 0.22}, "weighing"),
+        ({"none": 0.2, "thinking": 0.05, "casual": 0.04}, None),  # no style stands out
+    ],
+)
+def test_choose_filler(probs, expected):
+    from app.turns.policy import choose_filler
+
+    assert choose_filler(filler_result(probs)) == expected
+
+
+def test_choose_filler_without_jev():
+    from app.turns.policy import choose_filler
+
+    assert choose_filler(None) is None
+    assert choose_filler(JevResult(ok=False, error="timeout")) is None
+
+
+@pytest.mark.parametrize(
+    "speech_s,energy,passive,expected",
+    [
+        (0.9, 0.2, False, True),  # still talking past any backchannel: interrupt on duration
+        (0.5, 0.2, False, False),  # short enough to be "yeah" / "mm-hm"
+        (1.2, 0.2, True, False),  # Jev already called it a backchannel
+        (1.2, 0.01, False, False),  # too quiet: AEC residue of the bot's own voice
+    ],
+)
+def test_sustained_overlap_interrupt(speech_s, energy, passive, expected):
+    from app.turns.policy import sustained_overlap_interrupt
+
+    assert sustained_overlap_interrupt(speech_s=speech_s, energy=energy, resolved_passive=passive) is expected

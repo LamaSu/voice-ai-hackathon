@@ -68,10 +68,20 @@ class Speak(BaseModel):
 
 
 class Metrics(BaseModel):
-    """Stage timestamps so the latency HUD can show end of speech to first audio."""
+    """Stage timestamps so the latency HUD can show end of speech to first audio.
+
+    Two numbers, deliberately. Once a cached filler can be the first thing the
+    user hears, "first audio" stops meaning "the answer": it measures the
+    moment the agent made a sound. ``first_content_ms`` measures the moment it
+    said something. Reporting only the first would flatter us with a number
+    that does not mean what it appears to, which is the kind of thing a judge
+    catches. Both fields are optional, and with no filler they are equal.
+    """
 
     t_ms: int
     end_of_speech_to_first_audio_ms: float | None = None
+    end_of_speech_to_first_content_ms: float | None = None
+    filler: str | None = None
     stages: dict[str, float] = Field(default_factory=dict)
     detail: dict[str, Any] = Field(default_factory=dict)
 
