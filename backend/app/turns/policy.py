@@ -20,6 +20,7 @@ class Action(str, Enum):
     RESPOND = "respond"  # close user turn, run LLM
     HOLD = "hold"  # user paused but not done; keep listening
     DROP = "drop"  # speech not for the agent; discard it
+    PROBE = "probe"  # stop mid-explanation and ask a non-leading repair question
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,8 @@ class PolicyConfig:
     hold_max_silence_s: float = 2.0
     fallback_respond_silence_s: float = 0.8
     introducing_self: float = 0.6
+    confusion_threshold: float = 0.6  # confusion_p (Contract 1) at/above this counts as "high"
+    confusion_confirm_samples: int = 3  # consecutive high samples (~300ms at 10Hz) before acting
 
 
 @dataclass(frozen=True)
@@ -129,3 +132,56 @@ def decide_end_of_turn(
 
 def is_introduction(r: JevResult | None, cfg: PolicyConfig = PolicyConfig()) -> bool:
     return bool(r and r.ok and r.nouls.get("introducing_self", 0.0) >= cfg.introducing_self)
+
+
+class ConfusionTracker:
+    """Counts consecutive user_state samples with confusion_p at or above
+    threshold.
+
+    Per COORDINATION.md's decision log, confusion_p is a noisy prior, not a
+    verdict, so decide_probe should act on sustained confusion rather than a
+    single reading. Reset whenever the bot starts a new utterance so a probe
+    decision is always about the explanation currently in progress.
+    """
+
+    def __init__(self, cfg: PolicyConfig = PolicyConfig()):
+        self._cfg = cfg
+        self._consecutive = 0
+
+    def observe(self, confusion_p: float) -> int:
+        if confusion_p >= self._cfg.confusion_threshold:
+            self._consecutive += 1
+        else:
+            self._consecutive = 0
+        return self._consecutive
+
+    def reset(self) -> None:
+        self._consecutive = 0
+
+
+def decide_probe(
+    confusion_p: float,
+    *,
+    consecutive_high: int,
+    bot_speaking: bool,
+    already_probing: bool,
+    cfg: PolicyConfig = PolicyConfig(),
+) -> Decision:
+    """Decide whether sustained high confusion_p should interrupt the bot's
+    explanation to ask a non-leading repair question (B2, the demo's core
+    repair moment).
+
+    This only decides *whether* to stop and probe. Picking the actual
+    non-leading question and enforcing the "at most one probe per 3 turns"
+    cap is the probe-question picker (#6); this stays a pure trigger so the
+    picker can call it without duplicating the threshold logic.
+    """
+    if already_probing:
+        return Decision(Action.CONTINUE, "probe_already_in_flight")
+    if not bot_speaking:
+        return Decision(Action.CONTINUE, "not_mid_explanation")
+    if confusion_p < cfg.confusion_threshold:
+        return Decision(Action.CONTINUE, "confusion_below_threshold")
+    if consecutive_high < cfg.confusion_confirm_samples:
+        return Decision(Action.CONTINUE, "confusion_not_sustained")
+    return Decision(Action.PROBE, "sustained_confusion")

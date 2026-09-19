@@ -25,7 +25,7 @@ from app.jev.client import JevResult
 from app.observers.latency_hud import LatencyHUD
 from app.state.engine import StateEngine
 from app.state.interaction_state import Phase
-from app.turns.policy import Action, decide_end_of_turn, decide_overlap
+from app.turns.policy import Action, ConfusionTracker, decide_end_of_turn, decide_overlap, decide_probe
 
 
 def overlap(intent, conf, **nouls):
@@ -195,9 +195,52 @@ async def test_the_repair_turn_is_measured_and_published():
     assert published[-1]["payload"]["detail"]["median_ms"] == 460.0
 
 
-@pytest.mark.xfail(
-    reason="B2 (#5) has not landed: nothing consumes confusion_p to trigger a probe yet.",
-    strict=True,
-)
 def test_high_confusion_triggers_a_probe_question():
-    from app.turns.policy import decide_probe  # noqa: F401  (does not exist yet)
+    # The staged moment from the demo script: mid-explanation, the driver's
+    # brow lowers and lips press for several consecutive ~10Hz samples.
+    sample = confused_sample(12_000)
+    tracker = ConfusionTracker()
+
+    for _ in range(2):
+        streak = tracker.observe(sample.confusion_p)
+        decision = decide_probe(
+            sample.confusion_p, consecutive_high=streak, bot_speaking=True, already_probing=False
+        )
+        assert decision.action is Action.CONTINUE, "must not stop on a single noisy reading"
+
+    streak = tracker.observe(sample.confusion_p)
+    decision = decide_probe(
+        sample.confusion_p, consecutive_high=streak, bot_speaking=True, already_probing=False
+    )
+    assert decision.action is Action.PROBE
+    assert decision.reason == "sustained_confusion"
+
+    # A calm reading resets the streak, so the next brief blip doesn't
+    # immediately retrigger a second probe.
+    tracker.reset()
+    decision = decide_probe(
+        sample.confusion_p, consecutive_high=tracker.observe(sample.confusion_p), bot_speaking=True, already_probing=False
+    )
+    assert decision.action is Action.CONTINUE
+
+
+async def test_confused_user_state_reaches_a_probe_decision_through_the_engine():
+    # End-to-end through the same StateEngine.publish() path lane C's
+    # user_state actually travels: the confusion sample is not just a
+    # standalone struct, it's what a subscriber sees on the wire.
+    engine = StateEngine()
+    seen: list[dict] = []
+
+    async def collect(event):
+        seen.append(event)
+
+    engine.add_publisher(collect)
+
+    tracker = ConfusionTracker()
+    decision = None
+    for t_ms in (12_000, 12_100, 12_200):
+        await engine.publish("user_state", **confused_sample(t_ms).model_dump())
+        streak = tracker.observe(seen[-1]["confusion_p"])
+        decision = decide_probe(seen[-1]["confusion_p"], consecutive_high=streak, bot_speaking=True, already_probing=False)
+
+    assert decision is not None and decision.action is Action.PROBE
