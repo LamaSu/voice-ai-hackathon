@@ -13,6 +13,50 @@ We ship a live voice agent that notices a user getting confused mid-explanation,
 
 **Submission:** register on hackathon.new, link this repo (no repo, not judged), add a demo video or live demo plan. One submission per team; teams are 2–4 people. Deadline **6:00 PM sharp**. The repo must be public by then.
 
+## Status board — 14:40, Sat Sept 19
+
+Updated by the lane D agent. Replace this block wholesale at each standup; do not let it go stale.
+
+**One-line state:** the engine is built and tested, nothing talks end to end yet, and the demo behaviour
+(#5) is unstaffed. We are behind on the pipeline and at risk on the thing we are being judged for.
+
+| Checkpoint | Due | State |
+| --- | --- | --- |
+| Walking skeleton | 1:00 PM | 🔴 **late** — providers, state, Jev policy done and tested; pipeline and controller not wired |
+| `user_state` flowing, HUD, Gradium usage | 2:30 PM | 🟡 HUD done and verified; nothing consumes `user_state`; Gradium usage unchecked |
+| Staged confusion → back up and probe | 3:30 PM | 🔴 **not started, unclaimed** (#5) |
+| Feature freeze | 4:30 PM | — |
+| Dress rehearsal + backup recording | 5:15 PM | — |
+| Repo public, README, submitted | 5:45 PM | — |
+
+**Lane status**
+
+| Lane | Owner | State |
+| --- | --- | --- |
+| A. Voice pipeline | Akash (acting) | 🟡 active on #1, `voice/1-jev-interaction-engine`. Engine green on 27 unit tests; pipeline being wired. ETA requested. |
+| B. Reasoning | **unstaffed** | 🔴 #4, #5, #6, #7 all untouched. **#5 is the demo.** |
+| C. Perception | folded into B | 🔴 nothing. `frontend/src/gaze/` reserved. |
+| D. Integration and demo | rg | 🟢 #11 and #12 done and in review; #13, #14 pending; #15 needs a human at the venue. |
+
+**Three decisions waiting on a human**
+
+1. **Who takes #5.** It is the demo moment and nobody has claimed it. If it stays unclaimed past ~3:00
+   it stops being a staffing problem and becomes a scope decision.
+2. **Which LLM** — blocked on #15. `gemma-4-31B-it` ≈ 3.5 s TTFT cannot meet the target;
+   `minimax-m2.7` ≈ 0.4 s can, but nobody has confirmed it runs on SambaNova hardware. Fast and
+   ineligible scores nothing. Needed before freeze.
+3. **Contracts 1–4 vs `InteractionState`** — the engine implements none of the four. Either emit them
+   at the edges (models are in `backend/app/contracts.py`) or formally replace them with a
+   `contract-change` issue. Leaving it implicit means lane C writes an emitter nothing reads.
+
+**Known single point of failure:** `backend/app/config.py` *requires* `JEV_API_KEY`, so the backend will
+not boot without it. The policy layer already falls back cleanly when Jev is unavailable — only the
+startup check is in the way. Asked on #1.
+
+**Process, honestly:** `main` has taken one direct push, two agents duplicated #1 because neither
+claimed first, and status comments are not happening. The rules in `CLAUDE.md` exist because three
+agents share one repo. New joiners: read [ONBOARDING.md](ONBOARDING.md).
+
 ## Getting started
 
 New here? Read [ONBOARDING.md](ONBOARDING.md) first — it has the live status, the open decisions and
