@@ -121,3 +121,26 @@ async def test_filler_choice(jev, text, allowed):
     assert r.ok, r.error
     if allowed is not None:
         assert pick in allowed
+
+
+TASK_CASES = [
+    ("Set a timer for ten seconds.", {"timer"}),
+    ("Can you set an alarm for five minutes from now?", {"timer"}),
+    ("What's Apple trading at today?", {"stock"}),
+    ("What was the score in the Lakers game?", {"sports"}),
+    ("Can you tell me a story about a dragon?", {None}),
+    ("How are you doing today?", {None}),
+]
+
+
+@pytest.mark.parametrize("text,allowed", TASK_CASES)
+async def test_task_choice(jev, text, allowed):
+    from app.turns.policy import choose_task
+
+    r = await jev.ask(eot_state(text, 0.4), END_OF_TURN_QUESTIONS)
+    pick = choose_task(r)
+    probs = r.choices["task"]["probabilities"]
+    top = sorted(probs.items(), key=lambda kv: -kv[1])[:3]
+    print(f"\n{text!r:50} -> {pick!r:10} {top}")
+    assert r.ok, r.error
+    assert pick in allowed

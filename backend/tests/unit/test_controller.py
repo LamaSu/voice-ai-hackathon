@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.tests.utils import SleepFrame, run_test
 
 from app.jev.client import JevResult
@@ -455,3 +456,63 @@ async def test_no_filler_when_jev_says_none():
     )
     assert not [f for f in down if isinstance(f, SpeechOutputAudioRawFrame)]
     assert fillers.picked == []
+
+
+async def test_announcement_waits_for_a_gap_in_the_conversation():
+    """A background agent's result must not cut across the user or the bot."""
+    from pipecat.frames.frames import TTSSpeakFrame
+
+    ctrl, engine, events = make()
+
+    async def announce_soon():
+        await asyncio.sleep(0.15)  # lands while the user is talking over the bot
+        await ctrl.announce("Your 10 second timer is up.")
+
+    task = asyncio.create_task(announce_soon())
+    down, _ = await run_test(
+        ctrl,
+        frames_to_send=[
+            BotStartedSpeakingFrame(),
+            VADUserStartedSpeakingFrame(),
+            SleepFrame(0.5),  # announcement is pending here and must stay silent
+            VADUserStoppedSpeakingFrame(),
+            BotStoppedSpeakingFrame(),
+            SleepFrame(0.8),  # now the room is quiet
+        ],
+    )
+    await task
+    kinds = [type(f).__name__ for f in down]
+    assert "TTSSpeakFrame" in kinds, "the result was never spoken"
+    spoken_at = kinds.index("TTSSpeakFrame")
+    quiet_at = kinds.index("BotStoppedSpeakingFrame")
+    assert spoken_at > quiet_at, "spoke before the conversation went quiet"
+    assert [f.text for f in down if isinstance(f, TTSSpeakFrame)] == ["Your 10 second timer is up."]
+    assert any(e["type"] == "interaction" and e["event"] == "announcement" for e in events)
+
+
+async def test_task_turn_always_gets_an_instant_receipt():
+    """"Set a timer" must make a sound immediately, even if Jev picked no filler."""
+    from pipecat.frames.frames import SpeechOutputAudioRawFrame
+
+    class TaskJev(FakeJev):
+        async def ask(self, state, questions, timeout_s=None):
+            r = await super().ask(state, questions, timeout_s)
+            if "next" in r.choices:
+                r.choices["task"] = {"choice": "timer", "confidence": 0.99, "probabilities": {}}
+                r.choices["filler"] = {"choice": "none", "confidence": 0.9, "probabilities": {"none": 0.9}}
+            return r
+
+    fillers = FakeFillers()
+    engine = StateEngine()
+    ctrl = InteractionController(engine, TaskJev(), fillers=fillers)
+    down, _ = await run_test(
+        ctrl,
+        frames_to_send=[
+            VADUserStartedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            tr("Set a timer for ten seconds."),
+            SleepFrame(0.3),
+        ],
+    )
+    assert fillers.picked == ["acknowledging"]
+    assert [f for f in down if isinstance(f, SpeechOutputAudioRawFrame)]

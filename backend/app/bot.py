@@ -34,6 +34,7 @@ from app.config import BACKEND_DIR, Settings, get_settings
 from app.jev.client import JevClient, JevResult, NullJev
 from app.observers.latency_hud import LatencyHUD
 from app.fillers import FillerLibrary
+from app.tasks.runner import TaskRunner
 from app.memory.store import MemoryLLM, MemoryStore, regex_name
 from app.perception.bot_tap import BotTap
 from app.perception.speaker_id import SpeakerIdProcessor, new_speaker_memory
@@ -42,7 +43,7 @@ from app.services import SYSTEM_PROMPT, make_llm, make_stt, make_tts
 from app.state.engine import StateEngine
 from app.state.interaction_state import ConversationState, SpeakerState
 from app.turns.controller import InteractionController
-from app.turns.policy import is_introduction
+from app.turns.policy import choose_task, is_introduction
 
 
 class SharedResources:
@@ -126,10 +127,15 @@ def build_session(
         ),
     )
 
+    async def publish_tasks(tasks: list[dict[str, Any]]) -> None:
+        await engine.publish("tasks", tasks=tasks)
+
+    runner = TaskRunner(publish_tasks, lambda text: controller.announce(text), llm=shared.memory_llm)
+
     async def publish_memory() -> None:
         await engine.publish("memory", **memory.to_ui())
 
-    def refresh_system_prompt(speaker_label: str | None) -> None:
+    def refresh_system_prompt(speaker_label: str | None, note: str | None = None) -> None:
         block = memory.prompt_block()
         who = memory.display_name(speaker_label)
         parts = [SYSTEM_PROMPT]
@@ -137,13 +143,25 @@ def build_session(
             parts.append(block)
         if who:
             parts.append(f"The person speaking right now is {who}.")
+        if note:
+            parts.append(note)
         msgs = context.get_messages()
         msgs[0] = {"role": "system", "content": "\n\n".join(parts)}
         context.set_messages(msgs)
 
-    async def before_respond(text: str, speaker_label: str | None) -> str:
+    async def before_respond(text: str, speaker_label: str | None, r: JevResult | None = None) -> str:
         # Who is speaking goes into the system prompt, not the transcript text (keeps the UI clean).
-        refresh_system_prompt(speaker_label)
+        kind = choose_task(r)
+        note = None
+        if kind:
+            rec = await runner.start(kind, text)
+            if rec:
+                note = (
+                    f"You just started a background job ({rec.title}). Say only that you're on it, "
+                    "in one short sentence. Do NOT invent the answer — it will be delivered when the "
+                    "job finishes."
+                )
+        refresh_system_prompt(speaker_label, note)
         return text
 
     async def on_turn_accepted(text: str, speaker_label: str | None, r: JevResult | None) -> None:
@@ -240,6 +258,7 @@ def build_session(
     @worker.rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):
         await publish_memory()
+        await publish_tasks(runner.snapshot())
         await engine.publish_snapshot(force=True)
 
     @worker.rtvi.event_handler("on_client_message")
@@ -288,6 +307,7 @@ def build_session(
     @worker.event_handler("on_pipeline_finished")
     async def on_finished(worker, frame):
         shared.sessions.discard(reset_session)
+        await runner.cancel_all()
         log_fh.close()
         await jev.aclose()
 

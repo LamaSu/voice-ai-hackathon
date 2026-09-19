@@ -150,7 +150,17 @@ export function mountJevPanels(client, root) {
   const summary = el("p", "summary", "");
   mem.append(memHead, people, el("h3", null, "Conversation summary"), summary);
 
-  root.append(speaker, overlap, eot, tl, mem);
+  // ---- background agents (telemetry) ----------------------------------------
+  const agents = el("div", "panel jev-agents");
+  const agentsHead = el("div", "mem-head");
+  agentsHead.append(el("h2", null, "Background agents"));
+  const agentsCount = el("span", "agents-count", "0 running");
+  agentsHead.append(agentsCount);
+  const agentList = el("ul", "agents");
+  agentList.append(el("li", "empty", "Ask for a timer, a stock price or a score — it runs here while you keep talking."));
+  agents.append(agentsHead, agentList);
+
+  root.append(speaker, overlap, eot, agents, tl, mem);
   fetch("/api/memory").then((r) => (r.ok ? r.json() : null)).then((m) => m && renderMemory(m)).catch(() => {});
 
   // ---- state for the timeline -----------------------------------------------
@@ -222,6 +232,39 @@ export function mountJevPanels(client, root) {
     for (const [name, p] of nouls) body.append(bar(name, p, { threshold: THRESHOLDS[name] }));
   }
 
+  let tasks = [];
+
+  function renderAgents() {
+    const running = tasks.filter((t) => t.status === "running");
+    agentsCount.textContent = running.length
+      ? `${running.length} running`
+      : `${tasks.length ? "idle" : "0 running"}`;
+    agentsCount.className = `agents-count${running.length ? " on" : ""}`;
+    agentList.innerHTML = "";
+    if (!tasks.length) {
+      agentList.append(el("li", "empty", "Ask for a timer, a stock price or a score — it runs here while you keep talking."));
+      return;
+    }
+    for (const t of tasks) {
+      const li = el("li", `agent agent-${t.status}`);
+      const top = el("div", "agent-top");
+      top.append(el("span", `agent-kind kind-${t.kind}`, t.kind));
+      top.append(el("span", "agent-title", t.title));
+      // running agents tick locally from the server's start time; finished ones freeze
+      const secs = t.status === "running" ? (Date.now() / 1000 - t.started_at) : t.elapsed_s;
+      top.append(el("span", "agent-time", `${Math.max(0, secs).toFixed(1)}s`));
+      li.append(top);
+      if (t.result) li.append(el("div", "agent-result", t.result));
+      else if (t.status === "running") li.append(el("div", "agent-result muted", "working…"));
+      agentList.append(li);
+    }
+  }
+
+  // tick the running agents' clocks without waiting for the server
+  setInterval(() => {
+    if (tasks.some((t) => t.status === "running")) renderAgents();
+  }, 200);
+
   function renderMemory(m) {
     people.innerHTML = "";
     const list = m.people || [];
@@ -270,6 +313,10 @@ export function mountJevPanels(client, root) {
         break;
       }
       case "interaction":
+        if (ev.event === "announcement") {
+          logLine(`agent result spoken: “${ev.text}”`, "act-respond");
+          break;
+        }
         if (ev.event === "filler") {
           logLine(`filler [${ev.category}] “${ev.text}” (${ev.duration_s}s, while the LLM thinks)`, "act-continue");
           break;
@@ -282,6 +329,10 @@ export function mountJevPanels(client, root) {
         break;
       case "memory":
         renderMemory(ev);
+        break;
+      case "tasks":
+        tasks = ev.tasks || [];
+        renderAgents();
         break;
       default:
         break;

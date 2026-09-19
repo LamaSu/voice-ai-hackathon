@@ -147,9 +147,36 @@ the agent plays a short cached reaction — "Hmm.", "Got it.", "Give me a sec." 
 
   Set `ENABLE_FILLERS=0` to turn them off.
 
+## Background agents (telemetry widget)
+
+"Set a timer for ten seconds", "what's Apple trading at", "what was the score" — work the
+conversation shouldn't wait for. Jev decides, an agent runs off the conversation path, and the
+answer is spoken when it's ready.
+
+- **Deciding:** the `task` question in the end-of-turn fan-out — `none | timer | stock | sports |
+  lookup` — so it costs no extra round trip. Live: "Set a timer for ten seconds" → timer (1.0),
+  "What was the score in the Lakers game?" → sports (1.0), "Tell me a story" → none (1.0).
+  `choose_task` needs 0.55 confidence: spinning up a visible agent on a guess is worse than not.
+- **Receipt:** a task turn always plays a cached acknowledging clip immediately (0.38 s), and the
+  LLM is told to say only that it's on it, never to invent the answer.
+- **Running:** `app/tasks/runner.py` spawns the agent and publishes a `tasks` event on every state
+  change. Sources need no API keys: Yahoo Finance for quotes, ESPN (`site.web.api.espn.com`) for
+  scores, the General Compute LLM for lookups. A failed agent reports and never breaks the call.
+- **Answering:** the result is spoken with `TTSSpeakFrame` **only at a gap** — nobody speaking, no
+  turn open, no answer on its way (`_conversation_is_idle`). Until then it waits. It appends to the
+  LLM context, so the agent knows what it said.
+- **Widget:** the UI lists each agent with kind, title, status, a locally-ticking elapsed clock and
+  the result.
+
+Measured end to end (`scripts/e2e_agents.py`): receipt 0.38 s, the conversation answers an unrelated
+question while the timer runs, the timer fires at 10.0 s and is spoken, and a stock agent returns a
+real price in about 2 s.
+
 ## Speaker ID and memory
 
 - **Diarization:** SpeechBrain ECAPA (`speechbrain/spkrec-ecapa-voxceleb`, 192-dim, CPU) plus WhoSpeaksLive's `SpeakerMemory` online clustering. The module is copied verbatim to `backend/app/perception/whospeaks/`.
+  - **Capped at 3 voice profiles**: every extra profile is another centroid to score on every live
+    window, and a roomful of half-heard voices costs latency on the turn-taking path.
   - Live: `score_existing` every 0.4 s during speech.
   - Final: `classify` on each whole utterance, which creates and updates the S1, S2, ... profiles.
 - **People memory:** when Jev's `introducing_self` is at least 0.6, General Compute extracts the name as JSON and binds it to the active speaker profile. Profiles, names and facts are saved to `backend/data/memory.json`, so people are recognized in later sessions.
@@ -169,6 +196,7 @@ The server sends events to the browser through RTVI server messages (`rtvi.send_
 | `metrics` | **Contract 4** | `{type: "metrics", payload: {...}}` from lane D's `LatencyHUD` |
 | `transcript` | final user or bot text | `role`, `text`, `speaker` |
 | `memory` | when memory changes | `people`: [{label, name, speech_seconds, facts}], `summary` |
+| `tasks` | background agents change | `tasks`: [{id, kind, title, status, started_at, elapsed_s, result, error}] |
 
 Client to server:
 - `client.sendClientMessage("user_state", <Contract 1>)` at about 10 Hz (lane C)

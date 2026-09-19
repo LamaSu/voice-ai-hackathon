@@ -49,6 +49,7 @@ class PolicyConfig:
     # decision is "is silence right?" (p(none)), not the top style's confidence.
     filler_none_max: float = 0.6
     filler_min_prob: float = 0.15
+    task_conf: float = 0.55  # spinning up an agent is visible, so only on a confident read
     confusion_threshold: float = 0.6  # confusion_p (Contract 1) at/above this counts as "high"
     confusion_confirm_samples: int = 3  # consecutive high samples (~300ms at 10Hz) before acting
 
@@ -160,6 +161,16 @@ def choose_filler(r: JevResult | None, cfg: PolicyConfig = PolicyConfig()) -> st
         return None
     category, p = max(((k, v) for k, v in probs.items() if k != "none"), key=lambda kv: kv[1], default=(None, 0.0))
     return category if p >= cfg.filler_min_prob else None
+
+
+def choose_task(r: JevResult | None, cfg: PolicyConfig = PolicyConfig()) -> str | None:
+    """Which background agent this turn should spin up, or None for ordinary conversation."""
+    if not r or not r.ok or "task" not in r.choices:
+        return None
+    c = r.choices["task"]
+    if c["choice"] == "none" or c["confidence"] < cfg.task_conf:
+        return None
+    return c["choice"]
 
 
 def is_introduction(r: JevResult | None, cfg: PolicyConfig = PolicyConfig()) -> bool:

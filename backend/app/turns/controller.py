@@ -21,6 +21,7 @@ from loguru import logger
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     SpeechOutputAudioRawFrame,
+    TTSSpeakFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
@@ -47,6 +48,7 @@ from app.turns.policy import (
     Decision,
     PolicyConfig,
     choose_filler,
+    choose_task,
     sustained_overlap_interrupt,
     decide_end_of_turn,
     decide_overlap,
@@ -68,7 +70,7 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s']", "", text.lower())).strip()
 
 
-BeforeRespond = Callable[[str, str | None], Awaitable[str]]
+BeforeRespond = Callable[[str, str | None, "JevResult | None"], Awaitable[str]]
 OnTurnAccepted = Callable[[str, str | None, JevResult | None], Awaitable[None]]
 
 
@@ -153,6 +155,9 @@ class InteractionController(FrameProcessor):
         # Covers LLM latency and the gaps between TTS sentences.
         self._awaiting_bot = False
         self._interrupted_this_turn = False  # Contract 2: final turn carries interrupted=true
+        # results from background agents, spoken at the next gap in the conversation
+        self._announcements: list[str] = []
+        self._announce_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------ helpers
     @property
@@ -219,7 +224,8 @@ class InteractionController(FrameProcessor):
             await self._on_final(frame)  # held until the speech becomes a turn
         elif isinstance(frame, (EndFrame, CancelFrame)):
             for name in ("_overlap_task", "_overlap_watchdog", "_overlap_end_task", "_eot_task",
-                         "_hold_task", "_final_wait_task", "_thinking_task", "_early_task"):
+                         "_hold_task", "_final_wait_task", "_thinking_task", "_early_task",
+                         "_announce_task"):
                 self._cancel(name)
             await self.push_frame(frame, direction)
         else:
@@ -623,7 +629,7 @@ class InteractionController(FrameProcessor):
         speaker = self.s.speaker.label
         if self._before_respond:
             try:
-                text_for_llm = await self._before_respond(text, speaker)
+                text_for_llm = await self._before_respond(text, speaker, r)
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"before_respond failed: {e}")
                 text_for_llm = text
@@ -667,6 +673,8 @@ class InteractionController(FrameProcessor):
         await self._engine.publish_snapshot(force=True)
 
     async def _maybe_play_filler(self, r: JevResult | None) -> None:
+        # Spinning up an agent always gets an instant spoken receipt: the LLM's own
+        # acknowledgement is a second away, and silence after "set a timer" reads as failure.
         """Speak a cached reaction while the LLM generates, if Jev picked one.
 
         The clip is pushed as output audio, so it plays before the LLM's first sentence and
@@ -674,7 +682,7 @@ class InteractionController(FrameProcessor):
         """
         if not self._fillers or not self._fillers.available():
             return
-        category = choose_filler(r, self._cfg)
+        category = "acknowledging" if choose_task(r, self._cfg) else choose_filler(r, self._cfg)
         if not category:
             return
         clip = self._fillers.pick(category)
@@ -689,6 +697,40 @@ class InteractionController(FrameProcessor):
             "interaction", event="filler", category=category, text=clip.text,
             duration_s=round(clip.duration_s, 2), speaker=self.s.speaker.name or self.s.speaker.label,
         )
+
+    def _conversation_is_idle(self) -> bool:
+        """A gap: nobody is speaking, no turn is open, and no answer is on its way."""
+        return (
+            not self.s.user.vad_speaking
+            and not self.s.bot.speaking
+            and not self._awaiting_bot
+            and not self._overlap
+            and not self._turn_open
+            and not self._held
+            and self.s.phase in (Phase.IDLE, Phase.LISTENING)
+        )
+
+    async def announce(self, text: str) -> None:
+        """Speak a background agent's result without hijacking the conversation."""
+        self._announcements.append(text)
+        if not self._announce_task or self._announce_task.done():
+            self._announce_task = self.create_task(self._announce_loop(), "announce")
+
+    async def _announce_loop(self) -> None:
+        try:
+            while self._announcements:
+                waited = 0.0
+                while not self._conversation_is_idle() and waited < 30.0:
+                    await asyncio.sleep(0.15)
+                    waited += 0.15
+                text = self._announcements.pop(0)
+                logger.info(f"announcing: {text!r}")
+                await self.push_frame(TTSSpeakFrame(text=text, append_to_context=True))
+                await self._engine.publish("interaction", event="announcement", text=text)
+                # let the announcement actually start before considering the next one
+                await asyncio.sleep(0.6)
+        except asyncio.CancelledError:
+            return
 
     async def _thinking_watch(self) -> None:
         """Safety net: if no bot audio ever arrives, don't stay 'busy' forever."""
