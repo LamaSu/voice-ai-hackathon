@@ -20,6 +20,7 @@ from typing import Any
 from loguru import logger
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
+    SpeechOutputAudioRawFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
@@ -45,6 +46,8 @@ from app.turns.policy import (
     Action,
     Decision,
     PolicyConfig,
+    choose_filler,
+    sustained_overlap_interrupt,
     decide_end_of_turn,
     decide_overlap,
     is_hard_stop,
@@ -52,9 +55,14 @@ from app.turns.policy import (
 )
 
 OVERLAP_MIN_INTERVAL_S = 0.15
-OVERLAP_FINAL_WAIT_S = 1.2  # after VAD stop in overlap, how long to wait for the final transcript
-EOT_FINAL_WAIT_S = 1.0  # after VAD stop in a turn, how long to wait for the final transcript
+# Gradium finalizes ~0.9 s after the VAD-stop flush, so these windows have to outlast that
+# or a real barge-in gets discarded as noise before its transcript ever arrives.
+OVERLAP_FINAL_WAIT_S = 1.8  # after VAD stop in overlap, how long to wait for the final transcript
+EOT_FINAL_WAIT_S = 1.5  # after VAD stop in a turn, how long to wait for the final transcript
 THINKING_TIMEOUT_S = 12.0
+# A timed-out end-of-turn ask costs ~2s (we fall back to waiting for the final transcript),
+# so give it room; a barge-in ask is re-issued on the next word, so keep it short.
+EOT_JEV_TIMEOUT_S = 1.2
 
 def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s']", "", text.lower())).strip()
@@ -103,6 +111,7 @@ class InteractionController(FrameProcessor):
         cfg: PolicyConfig = PolicyConfig(),
         before_respond: BeforeRespond | None = None,
         on_turn_accepted: OnTurnAccepted | None = None,
+        fillers=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -111,6 +120,7 @@ class InteractionController(FrameProcessor):
         self._cfg = cfg
         self._before_respond = before_respond
         self._on_turn_accepted = on_turn_accepted
+        self._fillers = fillers
 
         self._held: list[TranscriptionFrame] = []
         self._turn_open = False  # ProposedUserStartedSpeakingFrame sent, stop not yet sent
@@ -294,7 +304,9 @@ class InteractionController(FrameProcessor):
             spec_text = (self._held_text() + " " + u.partial_transcript).strip()
             if spec_text:
                 state = to_jev_state(self.s, self._now(), transcript=spec_text)
-                task = self.create_task(self._jev.ask(state, END_OF_TURN_QUESTIONS), "jev_eot_spec")
+                task = self.create_task(
+                    self._jev.ask(state, END_OF_TURN_QUESTIONS, EOT_JEV_TIMEOUT_S), "jev_eot_spec"
+                )
                 self._spec = (self._utt, _norm(spec_text), task)
             if self._held and not u.partial_transcript:
                 self._schedule_eot()
@@ -394,6 +406,15 @@ class InteractionController(FrameProcessor):
                 speech_s = self._now() - self._overlap_started
                 if is_hard_stop(text):
                     await self._apply_overlap(Decision(Action.INTERRUPT, "hard_stop_phrase"), None, text)
+                    return
+                if self.s.user.vad_speaking and sustained_overlap_interrupt(
+                    speech_s=speech_s,
+                    energy=self.s.user.energy,
+                    resolved_passive=self._overlap_resolved == Action.CONTINUE,
+                    cfg=self._cfg,
+                ):
+                    # longer than any backchannel, and the transcript hasn't arrived yet
+                    await self._apply_overlap(Decision(Action.INTERRUPT, "sustained_overlap"), None, text)
                     return
                 if (
                     self._overlap_resolved is None
@@ -537,10 +558,10 @@ class InteractionController(FrameProcessor):
             if text and spec and spec[0] == utt and spec[1] == _norm(text):
                 r = await spec[2]  # speculative answer on identical text: saves a Jev round trip
                 if r is not None:
-                    r.latency_ms = 0.0 if r.ok else r.latency_ms
+                    r.reused = True  # its latency was paid before the final transcript arrived
             elif text:
                 state = to_jev_state(self.s, self._now(), transcript=text)
-                r = await self._jev.ask(state, END_OF_TURN_QUESTIONS)
+                r = await self._jev.ask(state, END_OF_TURN_QUESTIONS, EOT_JEV_TIMEOUT_S)
             if utt != self._utt or self.s.user.vad_speaking or utt == self._answered_utt:
                 return  # user resumed while we were asking, or already answered from interim
             silence_s = self._now() - (self.s.user.speech_stopped_at or self._now())
@@ -569,7 +590,7 @@ class InteractionController(FrameProcessor):
             if not text:
                 return
             state = to_jev_state(self.s, self._now(), transcript=text)
-            r = await self._jev.ask(state, END_OF_TURN_QUESTIONS)
+            r = await self._jev.ask(state, END_OF_TURN_QUESTIONS, EOT_JEV_TIMEOUT_S)
             current = (self._held_text() + " " + self.s.user.partial_transcript).strip()
             if utt != self._utt or self.s.user.vad_speaking or self._overlap or _norm(current) != _norm(text):
                 return
@@ -621,6 +642,9 @@ class InteractionController(FrameProcessor):
             )
         else:
             await self.push_frame(TranscriptionFrame(text_for_llm, "user", ""))
+        # Before the stop frame: that frame starts the LLM, and the TTS pauses other frames
+        # while it generates, so a filler pushed afterwards would queue behind the answer.
+        await self._maybe_play_filler(r)
         await self.push_frame(ProposedUserStoppedSpeakingFrame())
         self._turn_open = False
         c = self.s.conversation
@@ -641,6 +665,30 @@ class InteractionController(FrameProcessor):
         if self._on_turn_accepted:
             self.create_task(self._on_turn_accepted(text, speaker, r), "turn_accepted")
         await self._engine.publish_snapshot(force=True)
+
+    async def _maybe_play_filler(self, r: JevResult | None) -> None:
+        """Speak a cached reaction while the LLM generates, if Jev picked one.
+
+        The clip is pushed as output audio, so it plays before the LLM's first sentence and
+        an interruption flushes it with everything else.
+        """
+        if not self._fillers or not self._fillers.available():
+            return
+        category = choose_filler(r, self._cfg)
+        if not category:
+            return
+        clip = self._fillers.pick(category)
+        if not clip:
+            return
+        logger.info(f"filler [{category}]: {clip.text!r} ({clip.duration_s:.2f}s)")
+        await self.push_frame(
+            SpeechOutputAudioRawFrame(audio=clip.pcm, sample_rate=clip.sample_rate, num_channels=1)
+        )
+        self.s.bot.current_sentence = clip.text
+        await self._engine.publish(
+            "interaction", event="filler", category=category, text=clip.text,
+            duration_s=round(clip.duration_s, 2), speaker=self.s.speaker.name or self.s.speaker.label,
+        )
 
     async def _thinking_watch(self) -> None:
         """Safety net: if no bot audio ever arrives, don't stay 'busy' forever."""

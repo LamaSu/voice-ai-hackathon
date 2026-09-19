@@ -69,6 +69,23 @@ END_OF_TURN_QUESTIONS: dict[str, Any] = {
             "ignore": "The speech was not for the agent (side talk, noise, self-talk); do not reply.",
         },
     ),
+    "filler": Choice(
+        instructions=(
+            "The agent will take about a second to start answering. Which short spoken filler "
+            "should it say first, to sound like it's reacting rather than going quiet? Choose "
+            "'none' when a filler would be noise: very short exchanges, commands, or when the "
+            "user is still mid-thought."
+        ),
+        criteria={
+            "none": "Say nothing; answer directly.",
+            "thinking": "Buying a moment: 'Hmm', 'Let me think', 'Hold on', 'Let's see'.",
+            "acknowledging": "Receipt of what was said: 'Got it', 'I see', 'Right, right', 'Okay'.",
+            "weighing": "The question is interesting or hard: 'Good question', 'That's a tough one'.",
+            "reframing": "About to restate the user's point: 'So what you're saying is...'.",
+            "nuance": "The answer is qualified or the agent partly disagrees: 'Well, here's the thing', 'It depends'.",
+            "casual": "An informal reaction: 'Oof', 'Ooh', 'Welp', 'Ah', 'Look...'.",
+        },
+    ),
     "introducing_self": Noul(
         instructions="Is the user telling the agent their own name (introducing themselves)?"
     ),
@@ -140,6 +157,8 @@ def to_jev_state(
             "gaze_confidence": _r(s.vision.gaze_confidence),
             "head_yaw_deg": _r(s.vision.head_yaw, 1),
             "head_pitch_deg": _r(s.vision.head_pitch, 1),
+            "people_in_frame": s.vision.face_count,
+            "people_looking_at_agent": s.vision.faces_looking_at_agent,
             "wants_turn": s.vision.wants_turn,
             "confusion_p": _r(s.vision.confusion_p),
             "nod": s.vision.nod,

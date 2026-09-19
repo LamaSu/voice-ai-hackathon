@@ -9,6 +9,7 @@ from typing import Any
 
 from loguru import logger
 
+from app.services import BOT_NAME
 from app.state.interaction_state import InteractionState, Phase
 
 Publisher = Callable[[dict[str, Any]], Awaitable[None]]
@@ -85,6 +86,7 @@ class StateEngine:
             "user_energy": round(s.user.energy, 3),
             "partial": s.user.partial_transcript,
             "speaker": s.speaker.model_dump(),
+            "bot_name": BOT_NAME,
             "vision": s.vision.model_dump(),
             "version": s.version,
         }

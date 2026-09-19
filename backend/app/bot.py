@@ -33,12 +33,14 @@ from pipecat.workers.runner import WorkerRunner
 from app.config import BACKEND_DIR, Settings, get_settings
 from app.jev.client import JevClient, JevResult, NullJev
 from app.observers.latency_hud import LatencyHUD
+from app.fillers import FillerLibrary
 from app.memory.store import MemoryLLM, MemoryStore, regex_name
 from app.perception.bot_tap import BotTap
 from app.perception.speaker_id import SpeakerIdProcessor, new_speaker_memory
-from app.perception.vision import apply_gaze, apply_user_state
+from app.perception.vision import apply_faces, apply_gaze, apply_user_state
 from app.services import SYSTEM_PROMPT, make_llm, make_stt, make_tts
 from app.state.engine import StateEngine
+from app.telemetry import SessionTelemetry
 from app.state.interaction_state import ConversationState, SpeakerState
 from app.turns.controller import InteractionController
 from app.turns.policy import is_introduction
@@ -56,6 +58,7 @@ class SharedResources:
             self.settings.llm_model,
         )
         self.speakers = new_speaker_memory(self.memory)  # shared by all sessions
+        self.fillers = FillerLibrary() if self.settings.enable_fillers else None
         self.sessions: set = set()  # per-session async reset callbacks
         self._embedder = None
         self._embedder_lock = threading.Lock()
@@ -153,6 +156,15 @@ def build_session(
         name = await shared.memory_llm.extract_name(text)
         if not name:
             return
+        speaker_label = speaker_label or engine.state.speaker.label
+        if not speaker_label:
+            # ECAPA classifies the utterance just after the VAD stop; on a first, short
+            # introduction the label can land a moment after the turn is accepted.
+            for _ in range(8):
+                await asyncio.sleep(0.1)
+                speaker_label = engine.state.speaker.label
+                if speaker_label:
+                    break
         if speaker_label:
             memory.set_name(speaker_label, name)
             if engine.state.speaker.label == speaker_label:
@@ -176,7 +188,11 @@ def build_session(
     )
     stt = make_stt(s)
     controller = InteractionController(
-        engine, jev, before_respond=before_respond, on_turn_accepted=on_turn_accepted
+        engine,
+        jev,
+        before_respond=before_respond,
+        on_turn_accepted=on_turn_accepted,
+        fillers=shared.fillers,
     )
     llm = make_llm(s)
     tts = make_tts(s)
@@ -216,6 +232,11 @@ def build_session(
     hud.attach(latency_observer)
 
     engine.add_publisher(send_to_client)
+    telemetry = SessionTelemetry(session_id, BACKEND_DIR / "logs", settings=s)
+    engine.add_publisher(telemetry.publisher())
+    # Contract 4 samples land in the session log too, so a slow turn can be read
+    # next to the Jev decision and transcript that produced it.
+    hud.add_sink(telemetry.metrics_publisher())
     log_writer, log_fh, log_path = _jsonl_logger(session_id)
     engine.add_publisher(log_writer)
     for p in extra_publishers or []:
@@ -231,6 +252,12 @@ def build_session(
     async def on_client_message(rtvi, msg):
         if msg.type == "user_state" and isinstance(msg.data, dict):
             apply_user_state(engine, msg.data)  # Contract 1 (lane C)
+        elif msg.type == "client_log" and isinstance(msg.data, dict):
+            # Browser-side trouble (autoplay blocked, MediaPipe down, WebRTC) is
+            # invisible server-side and dies with the console. Land it on disk.
+            telemetry.client_log(msg.data)
+        elif msg.type == "faces" and isinstance(msg.data, dict):
+            apply_faces(engine, msg.data)  # per-face gaze for everyone in frame
         elif msg.type == "gaze" and isinstance(msg.data, dict):
             apply_gaze(engine, msg.data)
         elif msg.type == "reset_memory":

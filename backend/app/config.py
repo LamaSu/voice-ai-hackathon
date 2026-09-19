@@ -35,7 +35,7 @@ class Settings:
     general_compute_base_url: str = os.getenv(
         "GENERAL_COMPUTE_BASE_URL", "https://api.generalcompute.com/v1"
     )
-    llm_model: str = os.getenv("LLM_MODEL", "minimax-m2.7")
+    llm_model: str = os.getenv("LLM_MODEL", "gpt-oss-120b")
     jev_model: str = os.getenv("JEV_MODEL", "jev-latest")
     jev_timeout_s: float = float(os.getenv("JEV_TIMEOUT_S", "0.6"))
     gradium_tts_voice: str | None = os.getenv("GRADIUM_TTS_VOICE") or None
@@ -43,6 +43,8 @@ class Settings:
     host: str = os.getenv("HOST", "127.0.0.1")
     port: int = int(os.getenv("PORT", "7860"))
     enable_speaker_id: bool = os.getenv("ENABLE_SPEAKER_ID", "1") == "1"
+    # Cached spoken fillers ("Hmm", "Got it") played while the LLM generates
+    enable_fillers: bool = os.getenv("ENABLE_FILLERS", "1") == "1"
 
 
 _settings: Settings | None = None

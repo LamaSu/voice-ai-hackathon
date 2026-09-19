@@ -57,6 +57,10 @@ class VisionState(BaseModel):
     confusion_p: float = 0.0
     nod: int = 0
     au: dict[str, float] = Field(default_factory=dict)
+    # everyone in frame (lane A `faces` message), for multi-person turn decisions
+    face_count: int = 0
+    faces_looking_at_agent: int = 0
+    faces: list[dict] = Field(default_factory=list)
     updated_at: float | None = None
 
 

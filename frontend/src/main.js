@@ -11,11 +11,37 @@ import { PipecatClient, RTVIEvent } from "@pipecat-ai/client-js";
 import { SmallWebRTCTransport } from "@pipecat-ai/small-webrtc-transport";
 
 import { LatencyHUD } from "./hud.js";
-import { mountJevPanels } from "./jev/panels.js";
+import { mountJevPanels, speakers } from "./jev/panels.js";
 import { startFaceTracking } from "./jev/face.js";
 import { MSG_METRICS } from "./contracts.js";
 
 const hud = new LatencyHUD(document);
+
+// --- browser telemetry -----------------------------------------------------
+// Autoplay blocks, MediaPipe failures and WebRTC trouble all happen here and
+// would otherwise die in a console nobody has open. Ship them to the session
+// log so `scripts/diagnose.py` can show them beside the server's view.
+function report(level, message, extra = {}) {
+  try {
+    if (client?.connected) {
+      client.sendClientMessage("client_log", {
+        level,
+        message: String(message).slice(0, 2000),
+        at: new Date().toISOString(),
+        ...extra,
+      });
+    }
+  } catch {
+    /* telemetry must never break the call */
+  }
+}
+
+window.addEventListener("error", (e) =>
+  report("error", e.message, { source: e.filename, line: e.lineno }),
+);
+window.addEventListener("unhandledrejection", (e) =>
+  report("error", `unhandled rejection: ${e.reason}`),
+);
 
 const els = {
   connect: document.getElementById("connect"),
@@ -38,10 +64,11 @@ const client = new PipecatClient({
   callbacks: {
     onTransportStateChanged: (state) => setState(state),
     onBotReady: () => log("system", "bot ready"),
+    // Credit the recognized speaker and the agent by name, not "YOU"/"AGENT".
     onUserTranscript: (data) => {
-      if (data?.final) log("you", data.text);
+      if (data?.final) log(speakers.user, data.text, "you");
     },
-    onBotTranscript: (data) => log("agent", data?.text ?? ""),
+    onBotTranscript: (data) => log(speakers.bot, data?.text ?? "", "agent"),
     onError: (err) => log("error", String(err?.message ?? err)),
   },
 });
@@ -110,6 +137,9 @@ function showLocalVideo(track) {
       client.sendClientMessage("user_state", state);
       return true;
     },
+    sendFaces: (faces) => {
+      if (client.connected) client.sendClientMessage("faces", faces);
+    },
   });
 }
 
@@ -123,6 +153,7 @@ function playBotAudio(track) {
     (err) => {
       log("system", "browser blocked audio — click “enable sound”");
       console.warn("autoplay blocked:", err);
+      report("warn", `autoplay blocked: ${err?.name ?? err}`);
       els.unmute.removeAttribute("hidden");
     },
   );
@@ -135,10 +166,10 @@ function setState(state) {
   els.connect.textContent = client.connected ? "Disconnect" : "Connect";
 }
 
-function log(who, text) {
+function log(who, text, kind = who) {
   if (!text) return;
   const li = document.createElement("li");
-  li.className = `log-${who}`;
+  li.className = `log-${kind}`;
   li.innerHTML = `<span class="who">${who}</span><span class="what"></span>`;
   li.querySelector(".what").textContent = text;
   els.log.append(li);

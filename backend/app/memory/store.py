@@ -121,11 +121,11 @@ class MemoryStore:
         known = [p for p in self.people.values() if p.name or p.facts]
         if known:
             lines.append("People you know (recognized by voice):")
-            for p in known:
-                facts = "; ".join(p.facts[-6:])
+            for p in known[-4:]:
+                facts = "; ".join(p.facts[-3:])
                 lines.append(f"- {p.name or p.label} ({p.label}){': ' + facts if facts else ''}")
         if self.summary:
-            lines.append(f"Conversation so far: {self.summary}")
+            lines.append(f"Conversation so far: {self.summary[:400]}")
         return "\n".join(lines)
 
 

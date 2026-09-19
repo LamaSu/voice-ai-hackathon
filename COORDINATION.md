@@ -13,49 +13,56 @@ We ship a live voice agent that notices a user getting confused mid-explanation,
 
 **Submission:** register on hackathon.new, link this repo (no repo, not judged), add a demo video or live demo plan. One submission per team; teams are 2–4 people. Deadline **6:00 PM sharp**. The repo must be public by then.
 
-## Status board — 14:40, Sat Sept 19
+## Status board — 16:05, Sat Sept 19
 
 Updated by the lane D agent. Replace this block wholesale at each standup; do not let it go stale.
 
-**One-line state:** the engine is built and tested, nothing talks end to end yet, and the demo behaviour
-(#5) is unstaffed. We are behind on the pipeline and at risk on the thing we are being judged for.
+**One-line state:** everything is built and merged; `main` is green and carries the whole demo path.
+The one thing standing between us and the prize we are targeting is **latency: ~3 s live against a
+1.5 s "phone tree" line.** Eligibility (#15) is still unverified.
 
 | Checkpoint | Due | State |
 | --- | --- | --- |
-| Walking skeleton | 1:00 PM | 🔴 **late** — providers, state, Jev policy done and tested; pipeline and controller not wired |
-| `user_state` flowing, HUD, Gradium usage | 2:30 PM | 🟡 HUD done and verified; nothing consumes `user_state`; Gradium usage unchecked |
-| Staged confusion → back up and probe | 3:30 PM | 🔴 **not started, unclaimed** (#5) |
-| Feature freeze | 4:30 PM | — |
-| Dress rehearsal + backup recording | 5:15 PM | — |
-| Repo public, README, submitted | 5:45 PM | — |
+| Walking skeleton | 1:00 PM | ✅ done (late) |
+| `user_state` flowing, HUD, Gradium usage | 2:30 PM | ✅ HUD live; `user_state` reaching the reasoner. Gradium credit usage still unchecked. |
+| Staged confusion → back up and probe | 3:30 PM | 🟡 trigger + picker merged (#5, #6). Needs a live run to confirm the repair fires on stage. |
+| Feature freeze | 4:30 PM | **now** |
+| Dress rehearsal + backup recording | 5:15 PM | ⬜ see `docs/DEMO_RUNBOOK.md` |
+| Repo public, README, submitted | 5:45 PM | ⬜ **ask rg before making the repo public** |
 
-**Lane status**
+### Latency — the one number that matters now
 
-| Lane | Owner | State |
-| --- | --- | --- |
-| A. Voice pipeline | Akash (acting) | 🟡 active on #1, `voice/1-jev-interaction-engine`. Engine green on 27 unit tests; pipeline being wired. ETA requested. |
-| B. Reasoning | **unstaffed** | 🔴 #4, #5, #6, #7 all untouched. **#5 is the demo.** |
-| C. Perception | folded into B | 🔴 nothing. `frontend/src/gaze/` reserved. |
-| D. Integration and demo | rg | 🟢 #11 and #12 done and in review; #13, #14 pending; #15 needs a human at the venue. |
+Live is **~3 s** end of speech to first audio. Findings, so nobody re-derives them:
 
-**Three decisions waiting on a human**
+- **`delay_in_frames=7` is already the floor** (Gradium allows 7, 8, 10, 12…; default 12). That is a
+  **560 ms inherent ASR lookahead** we cannot configure away. `VADParams(stop_secs=0.3)` is likewise
+  already tight. **There is no quick transcription win.**
+- **The LLM is not the long pole.** minimax TTFT ≈ 0.4 s of ~3 s. Inference going to zero still leaves
+  ~2.5 s. Time is in speech synthesis, text aggregation, and that ASR floor.
+- **Therefore SambaNova will not fix this.** We already run on whatever hardware General Compute uses;
+  #15 is an *eligibility* fact, not a performance lever. Answering it changes no number.
+- `scripts/where_time_goes.py` ranks the stages from `metrics.jsonl`. **Run it before changing
+  anything** — it takes 30 s and stops us optimising the wrong row.
+- Structural win, already half-built and still open: **#7 / B4, reason on partial transcripts.**
+  `InteractionController._early_eot()` already responds on interim text, but only when Jev returns
+  RESPOND; otherwise we wait `EOT_FINAL_WAIT_S = 1.0` for Gradium's final.
+- Not for today: Gradium STT has **native turn detection** (`enable_turn_detection`) we don't use,
+  running Silero VAD + Jev + a 1 s wait instead. Collapsing those is the right post-event answer.
 
-1. **Who takes #5.** It is the demo moment and nobody has claimed it. If it stays unclaimed past ~3:00
-   it stops being a staffing problem and becomes a scope decision.
-2. **Which LLM** — blocked on #15. `gemma-4-31B-it` ≈ 3.5 s TTFT cannot meet the target;
-   `minimax-m2.7` ≈ 0.4 s can, but nobody has confirmed it runs on SambaNova hardware. Fast and
-   ineligible scores nothing. Needed before freeze.
-3. **Contracts 1–4 vs `InteractionState`** — the engine implements none of the four. Either emit them
-   at the edges (models are in `backend/app/contracts.py`) or formally replace them with a
-   `contract-change` issue. Leaving it implicit means lane C writes an emitter nothing reads.
+### Known limits, so we describe them accurately at the table
 
-**Known single point of failure:** `backend/app/config.py` *requires* `JEV_API_KEY`, so the backend will
-not boot without it. The policy layer already falls back cleanly when Jev is unavailable — only the
-startup check is in the way. Asked on #1.
+- **One face only.** `numFaces: 1` in `frontend/src/gaze/index.ts`, and only `faceBlendshapes[0]` is
+  read. Contract 1 has no multi-face representation either, so this is a contract change, not a flag.
+- **Second speakers need time.** `min_new_speaker_seconds=1.5`, `late_new_speaker_min_seconds=2.5`.
+  A short interjection from a second voice gets absorbed into the first speaker rather than getting
+  its own profile.
 
-**Process, honestly:** `main` has taken one direct push, two agents duplicated #1 because neither
-claimed first, and status comments are not happening. The rules in `CLAUDE.md` exist because three
-agents share one repo. New joiners: read [ONBOARDING.md](ONBOARDING.md).
+### Open, and needing a human rather than an agent
+
+1. **#15 — is `minimax-m2.7` served on SN40/SN50?** Unanswered by everyone asked; the API does not say.
+   Someone at the General Compute table has to answer it in writing. Fast and ineligible scores zero.
+2. **Gradium credits.** 145,000 on a Free plan with overages off — service simply stops when they run
+   out. Nobody has checked the balance since kickoff, and the rehearsal will spend some.
 
 ## Getting started
 
@@ -154,6 +161,7 @@ Newest first. Any change to a contract, lane scope, or the demo script goes here
 
 | When | Decision | Why | By |
 | --- | --- | --- | --- |
+| Sept 19, 16:05 | **Proposed, not built: pre-rendered filler audio to mask latency.** rg's idea — the agent says "Hmm, let me think" the instant a turn is accepted, while the real answer streams behind it. **The catch that decides whether it works:** a filler routed through normal TTS buys nothing, because Gradium synthesis is our top cost — it would arrive as late as the real answer. It only works pre-rendered to WAV at startup and pushed as `OutputAudioRawFrame`, bypassing TTS; `TTSSpeakFrame` re-enters TTS and does not help. Optional second Jev call picks a category (acknowledging / weighing / reframing / hedging) at ~145 ms p50; reframing fillers are strongest for us because they double as the repair behaviour. | It masks rather than reduces latency, which is legitimate and standard for voice agents — but if we ship it we must tell judges the first audio is a filler, or the metric means something other than it appears to. Needs a threshold so a fast reply isn't slowed, and a wrong-toned filler reads worse than silence. Est. 45 min including testing, i.e. past the 4:30 freeze and on the demo path. | rg (proposed); build deferred |
 | Sept 19, 14:20 | Build on the Jev-driven interaction engine (`voice/1-jev-interaction-engine`), not the stock Pipecat quickstart | Most Technical Implementation counts depth double. A custom interruption-first controller with a deterministic policy layer, typed fan-out decisions and graceful Jev-unavailable fallbacks is a far stronger submission than the quickstart, and it already exists with 27 green unit tests. Rebuilding a simpler path would cost hours we do not have before the 4:30 freeze. | rg (delegated to lane D agent) |
 | Sept 19, 14:20 | **Open:** Contracts 1–4 vs the engine's `InteractionState` | The engine implements none of the four cross-lane contracts. Per rule 3 this needs a `contract-change` issue and every lane owner's sign-off before it lands on `main`. Until then, anything crossing a lane uses `backend/app/contracts.py`. | pending rg |
 | Sept 19, 14:20 | **Open:** which LLM | Measured TTFT is gemma-4-31B-it ≈ 3.5 s vs minimax-m2.7 ≈ 0.4 s (#16), so the model named in the quickstart cannot meet the latency target. Blocked on #15: whichever we pick must be confirmed as SambaNova-served, or we lose eligibility, which costs more than the latency. | pending rg |

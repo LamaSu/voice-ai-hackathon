@@ -46,6 +46,9 @@ class LatencyHUD:
         self._send = send
         self._log_path = log_path
         self._samples_ms: list[float] = []
+        self._content_ms: list[float] = []
+        self._content = None
+        self._sinks: list = []
 
     @property
     def samples_ms(self) -> list[float]:
@@ -66,8 +69,28 @@ class LatencyHUD:
             return ordered[mid]
         return (ordered[mid - 1] + ordered[mid]) / 2
 
-    def attach(self, observer) -> None:
-        """Subscribe to a `UserBotLatencyObserver`."""
+    def add_sink(self, sink) -> None:
+        """Also deliver every sample here (session telemetry, tests)."""
+        self._sinks.append(sink)
+
+    def median_content_ms(self) -> float | None:
+        """Median end-of-speech-to-answer, the number that survives a filler."""
+        if not self._content_ms:
+            return None
+        ordered = sorted(self._content_ms)
+        mid = len(ordered) // 2
+        if len(ordered) % 2:
+            return ordered[mid]
+        return (ordered[mid - 1] + ordered[mid]) / 2
+
+    def attach(self, observer, content_observer=None) -> None:
+        """Subscribe to a `UserBotLatencyObserver`.
+
+        Pass a `ContentLatencyObserver` as well and each sample also carries
+        time to the first answer audio, so a cached filler cannot quietly
+        turn the headline number into something else.
+        """
+        self._content = content_observer
 
         @observer.event_handler("on_latency_breakdown")
         async def _on_breakdown(_observer, breakdown):
@@ -79,6 +102,9 @@ class LatencyHUD:
                     c.key: round(c.duration_secs * 1000, 1)
                     for c in getattr(breakdown, "contributions", [])
                 },
+                content_secs=(
+                    (self._content.take() or 0) / 1000 if self._content is not None else None
+                ),
                 detail={
                     "measured_from": str(getattr(breakdown, "measured_from", "") or ""),
                     "labels": {
@@ -97,21 +123,45 @@ class LatencyHUD:
         total_secs: float,
         stages: dict[str, float] | None = None,
         detail: dict[str, Any] | None = None,
+        content_secs: float | None = None,
+        filler: str | None = None,
     ) -> Metrics:
         """Record one sample, publish it, and append it to the metrics log."""
         total_ms = round(total_secs * 1000, 1)
         self._samples_ms.append(total_ms)
+        # With no filler the answer *is* the first audio, so the two coincide.
+        content_ms = round(content_secs * 1000, 1) if content_secs else total_ms
+        self._content_ms.append(content_ms)
 
         sample = Metrics(
             t_ms=int(time.time() * 1000),
             end_of_speech_to_first_audio_ms=total_ms,
+            end_of_speech_to_first_content_ms=content_ms,
+            filler=filler,
             stages=stages or {},
-            detail={**(detail or {}), "median_ms": self.median_ms(), "n": len(self._samples_ms)},
+            detail={
+                **(detail or {}),
+                "median_ms": self.median_ms(),
+                "median_content_ms": self.median_content_ms(),
+                "n": len(self._samples_ms),
+            },
         )
 
-        logger.info(f"end of speech → first audio: {total_ms} ms (median {self.median_ms()} ms)")
+        if content_ms != total_ms:
+            logger.info(
+                f"end of speech → first audio {total_ms} ms (filler), "
+                f"→ answer {content_ms} ms (median {self.median_ms()} ms)"
+            )
+        else:
+            logger.info(f"end of speech → first audio: {total_ms} ms (median {self.median_ms()} ms)")
         self._append_to_log(sample)
-        await self._send({"type": MSG_METRICS, "payload": sample.model_dump()})
+        message = {"type": MSG_METRICS, "payload": sample.model_dump()}
+        await self._send(message)
+        for sink in self._sinks:
+            try:
+                await sink(message)
+            except Exception as exc:  # noqa: BLE001 - a sink must never break a turn
+                logger.warning(f"metrics sink failed: {exc}")
         return sample
 
     def _append_to_log(self, sample: Metrics) -> None:

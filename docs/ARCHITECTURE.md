@@ -29,9 +29,9 @@ Every key is read from the repo-root `.env`:
 
 | Role | Provider | Notes (measured 2026-09-19 from `backend/scripts/smoke_providers.py`) |
 | --- | --- | --- |
-| ASR | Gradium `wss://api.gradium.ai/api/speech/asr` via `pipecat.services.gradium.stt.GradiumSTTService` | Needs a language (`en`). Interim text streams continuously. The final transcript arrives after a VAD-stop flush. |
+| ASR | Gradium `wss://api.gradium.ai/api/speech/asr` via `pipecat.services.gradium.stt.GradiumSTTService` | Needs a language (`en`), `delay_in_frames=7` (its minimum). Interim text streams continuously but runs ~0.9 s behind the speaker; the final transcript arrives after a VAD-stop flush. That lag is why barge-in needs a duration backstop (below). |
 | TTS | Gradium `wss://api.gradium.ai/api/speech/tts` via `GradiumTTSService` | 48 kHz PCM with word timestamps. First audio in about 0.4–1.0 s. |
-| LLM | General Compute `https://api.generalcompute.com/v1` via Pipecat `OpenAILLMService(base_url=...)` | Time to first token: **minimax-m2.7 ≈ 0.4 s**, gpt-oss-120b 1.6–6.4 s, gemma-4-31B-it ≈ 3.5 s. Default: `minimax-m2.7`, overridable with `LLM_MODEL`. |
+| LLM | General Compute `https://api.generalcompute.com/v1` via Pipecat `OpenAILLMService(base_url=...)` | Time to first token on a demo-shaped prompt (`scripts/latency_check.py`, 5 trials): **gpt-oss-120b 559 ms**, gemma-4-31B-it 1138 ms, minimax-m2.7 1457 ms. Default `gpt-oss-120b`, overridable with `LLM_MODEL`. These move with provider load: minimax measured fastest earlier in the day, so re-run the check before relying on it. |
 | Interaction decisions | Jev `POST https://api.typesafe.ai/v1/systemone`, model `jev-latest` (currently jev-1.13.0), via `typesafe-sdk` | p50 ≈ 145 ms for a 2–4 question fan-out (range 90–470 ms). Hard timeout of 600 ms, then deterministic fallback. |
 
 ## Pipeline (Pipecat 1.11)
@@ -111,10 +111,41 @@ Validated live in `backend/tests/live/test_jev_live.py`:
 
 The deterministic rules on top of Jev live in `backend/app/turns/policy.py`:
 - Hard-stop phrases ("stop", "wait", "hold on") interrupt without waiting for Jev.
+- **Sustained overlap interrupts on duration alone** (`sustained_overlap_interrupt`): speech that keeps
+  going past 0.8 s while the bot talks is longer than any backchannel ("yeah", "mm-hm", "right" are all
+  shorter), so the bot stops before the transcript arrives. Suppressed if Jev already called this
+  utterance a backchannel, and gated on input energy so the AEC residue of the bot's own voice can't
+  trigger it. This is what keeps barge-in usable on a cloud ASR that runs ~0.9 s behind.
 - If Jev times out or errors, the policy falls back to rules on word count and speech duration.
 - An overlap longer than 1.5 s with 3 or more words interrupts, unless Jev is confident it's a backchannel.
 - After 2.0 s of silence, the agent responds even if Jev said HOLD.
 - Decisions made on stale state are discarded.
+
+## Spoken fillers (perceived latency)
+
+The LLM plus TTS take about 1.2 s to produce the first word of an answer. Instead of silence,
+the agent plays a short cached reaction — "Hmm.", "Got it.", "Give me a sec." — in its own voice.
+
+- **Which one:** Jev picks the category (or `none`) as part of the end-of-turn question set, so it
+  costs no extra round trip. The deterministic gate is p(none): Jev spreads probability across
+  styles because any of them would do, so a top-choice confidence test would almost always say
+  "none". See `choose_filler` in `turns/policy.py`.
+- **How often:** the gate is deliberately generous (`filler_none_max = 0.6`) — hearing something at ~0.1 s
+  beats hearing nothing for ~1 s, so silence is chosen only when Jev is fairly sure of it.
+- **Clips:** 49 utterances in 6 categories, generated once by `scripts/make_fillers.py` (Gradium TTS,
+  the bot's voice) into `backend/assets/fillers/`, trimmed of lead-in silence on load.
+- **Playback:** pushed as output audio **before** the frame that triggers the LLM. Pushed after, the
+  clip would queue behind the answer, since the TTS pauses other frames while it generates.
+- **Stopping:** no special case. A barge-in pushes `InterruptionFrame`, which drains the output
+  queue, so the filler stops with everything else.
+- **Measured** (same question, 3 runs each, `scripts/bench_fillers.py`):
+
+  | | First sound the user hears | Answer starts |
+  |---|---|---|
+  | Fillers on | **0.08 s** | 0.92 s |
+  | Fillers off | 1.16 s | 1.16 s |
+
+  Set `ENABLE_FILLERS=0` to turn them off.
 
 ## Speaker ID and memory
 
@@ -184,13 +215,37 @@ cd ../frontend && npm install && npm run dev    # web app (once it lands)
 - [x] Contracts at the edges: Contract 2 `turn` (partial and final, `interrupted`) and Contract 4 `metrics`, through lane D's `LatencyHUD` and `UserBotLatencyObserver`. Contract 1 `user_state` is consumed into the Jev state.
 - [x] Jev key is optional: `NullJev` means the deterministic policy fallbacks decide.
 - [x] Web panels (`frontend/src/jev/`): who is speaking with per-speaker probabilities, Jev probability bars with policy thresholds, a turn-taking timeline, and people/summary memory
-- [ ] MediaPipe face features: lane C, #8 (`frontend/src/gaze/`), sent as Contract 1
+- [x] MediaPipe face features (lane C's module, ported): mesh, irises and a gaze arrow drawn for **every**
+      face in frame (up to 4). Contract 1 `user_state` still describes one person (the largest face); a
+      separate `faces` message carries per-face gaze, and Jev's state gets `people_in_frame` and
+      `people_looking_at_agent` — the signal that separates "talking to me" from "talking to each other".
+- [x] Transcript credits the recognized speaker and the agent by name, not "YOU"/"AGENT"
+
+### Latency budget (end of speech → first audio, from the live HUD)
+
+| | Before | After |
+|---|---|---|
+| Median over a session | 1830 ms (82 turns) | **516 ms** (8 of 18 turns under 500 ms, best 361 ms) |
+
+What changed, largest first:
+- **Spoken fillers** are the first sound on most turns, so the wait for the LLM stops being silence.
+- **Jev's end-of-turn budget 0.6 s → 1.2 s.** A timed-out ask cost ~2 s, because the turn then fell back
+  to waiting for the final transcript. Barge-in asks keep the short budget: they are re-issued on the next word.
+- **Jev's hold timeout 2.0 s → 1.1 s.** 14 of 82 turns had been paying the full 2 s after Jev judged a turn incomplete.
+- **Endpointing 300 ms → 200 ms** (Silero `stop_secs`), with Jev's end-of-turn judgement as the safety net.
+- **Shorter system prompt and capped memory block**, so fewer prompt tokens precede the first token.
+- **`gpt-oss-120b`** replaced `minimax-m2.7` (559 ms vs 1457 ms TTFT on a demo-shaped prompt).
+
+The floor for a *generated* answer is about 0.9 s: LLM time to first token (~0.56 s) plus TTS (~0.25 s) plus
+endpointing. Getting the first *sound* under 200 ms is what the cached fillers do.
 
 ### Measured, with the WebRTC end-to-end test (aiortc client, Gradium-voiced user)
 
 | What | Result |
 | --- | --- |
-| Jev p50 | 200–270 ms |
+| Jev p50 | 140–270 ms |
+| Barge-in | decision **~0.85 s after the user's first syllable**, bot audio stops ~0.15 s later. The floor is Gradium's ~0.9 s transcript lag, which the duration backstop sidesteps. |
+| First sound after a question (filler) | **0.08–0.16 s** |
 | Backchannel ("Yeah.") while the bot talks | Classified `backchannel`, and the bot keeps talking |
 | Barge-in ("Actually, can you make it about a cat instead?") | Bot audio stops **0.86–1.1 s after the user starts speaking**. About 0.9 s of that is Gradium's first-word latency (delay_in_frames=7); Jev adds about 0.25 s. Hard-stop words skip Jev. |
 | End of speech to first bot audio | 1.2–2.5 s. The stages are VAD 0.3 s, ASR catch-up about 0.4 s, Jev about 0.2 s on the partial transcript (early end of turn), LLM about 0.5 s and TTS about 0.35 s. |
@@ -203,6 +258,7 @@ cd backend
 uv run pytest                                            # 60 unit + e2e-scenario tests (fake Jev, no network)
 uv run pytest -m live tests/live -s                      # 12 real-Jev decision tests
 uv run python scripts/make_fixtures.py                   # Gradium-voiced user clips (once)
+uv run python scripts/make_fillers.py                    # cached filler clips (once; committed already)
 DEV_FIXTURES=1 uv run python -m app.server &             # server + built frontend on :7860
 uv run python scripts/e2e_webrtc.py                      # real WebRTC end to end: intro, backchannel, barge-in, 2 speakers
 ```
