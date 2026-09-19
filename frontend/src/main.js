@@ -55,9 +55,13 @@ client.on(RTVIEvent.ServerMessage, (msg) => {
   if (body?.type === MSG_METRICS) hud.record(body.payload);
 });
 
+let localAudioTrack = null;
+
 client.on(RTVIEvent.TrackStarted, (track, participant) => {
   if (participant?.local) {
     if (track.kind === "video") showLocalVideo(track);
+    // C3 (#10): read-only, for prosody fusion into confusion_p. Never played back.
+    if (track.kind === "audio") localAudioTrack = track;
     return; // never play our own mic back at ourselves
   }
   if (track.kind === "audio") playBotAudio(track);
@@ -105,6 +109,9 @@ function showLocalVideo(track) {
     video: els.cam,
     overlay: document.getElementById("faceOverlay"),
     readout: document.getElementById("faceReadout"),
+    // C3 (#10): may still be null if the audio track hasn't arrived yet; the
+    // tracker degrades to face-only confusion_p in that case, same as before.
+    audio: localAudioTrack,
     send: (state) => {
       if (!client.connected) return false;
       client.sendClientMessage("user_state", state);
