@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Confusion-aware voice agent</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="/src/jev/panels.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="bar">
+        <h1>Confusion-aware voice agent</h1>
+        <div class="bar-right">
+          <span id="state" class="pill pill-idle">disconnected</span>
+          <button id="connect" class="primary">Connect</button>
+        </div>
+      </header>
+
+      <section class="grid">
+        <div class="panel video-panel">
+          <!-- Lane A: face mesh + gaze overlay (src/jev/face.js on lane C's src/gaze tracker) -->
+          <div class="cam-wrap">
+            <video id="cam" autoplay playsinline muted></video>
+            <canvas id="faceOverlay" class="face-overlay"></canvas>
+          </div>
+          <div id="faceReadout" class="face-readout"></div>
+          <!-- The bot's voice. Without this element the audio track arrives over
+               WebRTC and is never played, so the agent looks alive in the
+               transcript and is silent in the room. -->
+          <audio id="botAudio" autoplay playsinline></audio>
+          <button id="unmute" class="unmute" hidden>🔇 Click to enable sound</button>
+          <p class="note">
+            Camera stays in this browser. Face landmarks become numbers
+            (<code>user_state</code>); no video is sent to the server.
+          </p>
+          <div class="toggles">
+            <label><input type="checkbox" id="mic" checked /> Microphone</label>
+            <label><input type="checkbox" id="camToggle" checked /> Camera</label>
+          </div>
+        </div>
+
+        <div class="panel hud-panel">
+          <h2>End of speech → first audio</h2>
+          <div class="readout">
+            <span id="latest" class="latest">—</span><span class="unit">ms</span>
+          </div>
+          <dl class="stats">
+            <div><dt>median</dt><dd id="median">—</dd></div>
+            <div><dt>best</dt><dd id="best">—</dd></div>
+            <div><dt>worst</dt><dd id="worst">—</dd></div>
+            <div><dt>turns</dt><dd id="count">0</dd></div>
+          </dl>
+          <canvas id="spark" width="520" height="64" aria-label="recent latencies"></canvas>
+          <h3>Where the time went</h3>
+          <ul id="stages" class="stages">
+            <li class="empty">Waiting for the first turn…</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- Lane A: speaker ID, Jev decisions, turn timeline, memory (frontend/src/jev/) -->
+      <section id="jev-panels"></section>
+
+      <section class="panel log-panel">
+        <h2>Transcript</h2>
+        <ul id="log" class="log"></ul>
+      </section>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

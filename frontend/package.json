@@ -1,0 +1,25 @@
+{
+  "name": "confusion-agent-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc -b",
+    "predev": "node scripts/fetch-mediapipe.mjs",
+    "prebuild": "node scripts/fetch-mediapipe.mjs"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "0.10.14",
+    "@pipecat-ai/client-js": "^1.13.1",
+    "@pipecat-ai/small-webrtc-transport": "^1.10.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "vite": "^7.1.5",
+    "vitest": "^2.0.5"
+  }
+}
