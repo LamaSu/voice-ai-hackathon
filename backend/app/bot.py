@@ -1,0 +1,243 @@
+"""Pipeline assembly: one PipelineWorker per WebRTC session.
+
+transport.input -> VAD(signal) -> SpeakerId -> Gradium STT -> InteractionController(Jev)
+  -> user aggregator (external turns) -> General Compute LLM -> Gradium TTS
+  -> transport.output -> BotTap -> assistant aggregator
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import threading
+import time
+from typing import Any
+
+from loguru import logger
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.processors.audio.vad_processor import VADProcessor
+from pipecat.transports.base_transport import BaseTransport
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.workers.runner import WorkerRunner
+
+from app.config import BACKEND_DIR, Settings, get_settings
+from app.jev.client import JevClient, JevResult
+from app.memory.store import MemoryLLM, MemoryStore
+from app.perception.bot_tap import BotTap
+from app.perception.speaker_id import SpeakerIdProcessor
+from app.perception.vision import apply_gaze
+from app.services import SYSTEM_PROMPT, make_llm, make_stt, make_tts
+from app.state.engine import StateEngine
+from app.turns.controller import InteractionController
+from app.turns.policy import is_introduction
+
+
+class SharedResources:
+    """Loaded once per server process and shared by sessions: ECAPA model, memory, Jev client."""
+
+    def __init__(self, settings: Settings | None = None):
+        self.settings = settings or get_settings()
+        self.memory = MemoryStore()
+        self.memory_llm = MemoryLLM(
+            self.settings.general_compute_api_key,
+            self.settings.general_compute_base_url,
+            self.settings.llm_model,
+        )
+        self._embedder = None
+        self._embedder_lock = threading.Lock()
+
+    def embedder(self):
+        with self._embedder_lock:
+            if self._embedder is None:
+                from app.perception.ecapa import EcapaEmbedder
+
+                self._embedder = EcapaEmbedder()
+            return self._embedder
+
+    def new_jev(self) -> JevClient:
+        s = self.settings
+        return JevClient(s.jev_api_key, s.jev_model, timeout_s=s.jev_timeout_s)
+
+
+def _jsonl_logger(session_id: str):
+    path = BACKEND_DIR / "logs" / f"session-{session_id}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fh = path.open("a")
+
+    async def write(event: dict[str, Any]) -> None:
+        if event.get("type") == "state" or fh.closed:
+            return  # state is too chatty for the log
+        fh.write(json.dumps({"wall": time.time(), **event}, default=str) + "\n")
+        fh.flush()
+
+    return write, fh, path
+
+
+def build_session(
+    transport: BaseTransport,
+    shared: SharedResources,
+    *,
+    session_id: str | None = None,
+    extra_publishers: list | None = None,
+) -> tuple[PipelineWorker, StateEngine, InteractionController]:
+    s = shared.settings
+    session_id = session_id or time.strftime("%Y%m%d-%H%M%S")
+    engine = StateEngine()
+    memory = shared.memory
+    jev = shared.new_jev()
+
+    context = LLMContext(messages=[{"role": "system", "content": SYSTEM_PROMPT}])
+    user_agg, assistant_agg = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            user_turn_strategies=ExternalUserTurnStrategies(enable_interruptions=False),
+            user_turn_stop_timeout=10.0,
+        ),
+    )
+
+    async def publish_memory() -> None:
+        await engine.publish("memory", **memory.to_ui())
+
+    def refresh_system_prompt(speaker_label: str | None) -> None:
+        block = memory.prompt_block()
+        who = memory.display_name(speaker_label)
+        parts = [SYSTEM_PROMPT]
+        if block:
+            parts.append(block)
+        if who:
+            parts.append(f"The person speaking right now is {who}.")
+        msgs = context.get_messages()
+        msgs[0] = {"role": "system", "content": "\n\n".join(parts)}
+        context.set_messages(msgs)
+
+    async def before_respond(text: str, speaker_label: str | None) -> str:
+        refresh_system_prompt(speaker_label)
+        who = memory.display_name(speaker_label)
+        return f"[{who}] {text}" if who else text
+
+    async def on_turn_accepted(text: str, speaker_label: str | None, r: JevResult | None) -> None:
+        if not is_introduction(r):
+            return
+        name = await shared.memory_llm.extract_name(text)
+        if not name:
+            return
+        if speaker_label:
+            memory.set_name(speaker_label, name)
+            if engine.state.speaker.label == speaker_label:
+                engine.state.speaker.name = name
+            logger.info(f"memory: {speaker_label} is {name}")
+        else:
+            memory.pending_name = name  # bound on the next confident speaker decision
+        await engine.publish("turn", event="introduction", speaker=speaker_label, name=name)
+        await publish_memory()
+
+    vad = VADProcessor(
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(start_secs=0.15, stop_secs=0.3, confidence=0.7, min_volume=0.5))
+    )
+    speaker = SpeakerIdProcessor(
+        engine,
+        memory,
+        enabled=s.enable_speaker_id,
+        embedder_factory=shared.embedder,
+        on_memory_changed=publish_memory,
+    )
+    stt = make_stt(s)
+    controller = InteractionController(
+        engine, jev, before_respond=before_respond, on_turn_accepted=on_turn_accepted
+    )
+    llm = make_llm(s)
+    tts = make_tts(s)
+    bot_tap = BotTap(engine, on_response_done=controller.on_response_done)
+
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            vad,
+            speaker,
+            stt,
+            controller,
+            user_agg,
+            llm,
+            tts,
+            transport.output(),
+            bot_tap,
+            assistant_agg,
+        ]
+    )
+    worker = PipelineWorker(
+        pipeline,
+        params=PipelineParams(audio_in_sample_rate=16000, enable_metrics=True),
+        idle_timeout_secs=None,
+    )
+
+    async def send_to_client(event: dict[str, Any]) -> None:
+        await worker.rtvi.send_server_message(event)
+
+    engine.add_publisher(send_to_client)
+    log_writer, log_fh, log_path = _jsonl_logger(session_id)
+    engine.add_publisher(log_writer)
+    for p in extra_publishers or []:
+        engine.add_publisher(p)
+    logger.info(f"session {session_id}: event log -> {log_path}")
+
+    @worker.rtvi.event_handler("on_client_ready")
+    async def on_client_ready(rtvi):
+        await publish_memory()
+        await engine.publish_snapshot(force=True)
+
+    @worker.rtvi.event_handler("on_client_message")
+    async def on_client_message(rtvi, msg):
+        if msg.type == "gaze" and isinstance(msg.data, dict):
+            apply_gaze(engine, msg.data)
+        elif msg.type == "reset_memory":
+            memory.people.clear()
+            memory.profiles = []
+            memory.summary = ""
+            from app.perception.speaker_id import MEMORY_PARAMS
+            from app.perception.whospeaks.speaker_embedding_cluster import SpeakerMemory
+
+            speaker.speakers = SpeakerMemory(**MEMORY_PARAMS)
+            memory.save()
+            await publish_memory()
+
+    @assistant_agg.event_handler("on_assistant_turn_stopped")
+    async def on_assistant_turn_stopped(aggregator, message):
+        text = (message.content or "").strip()
+        if not text:
+            return
+        await engine.publish("transcript", role="bot", text=text, interrupted=message.interrupted)
+        label = engine.state.speaker.label
+        user_text = engine.state.conversation.last_user_turn
+
+        async def update_memory():
+            if await shared.memory_llm.update(memory, label, user_text, text):
+                await publish_memory()
+
+        asyncio.create_task(update_memory())
+
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"session {session_id}: client disconnected")
+        await worker.cancel()
+
+    @worker.event_handler("on_pipeline_finished")
+    async def on_finished(worker, frame):
+        log_fh.close()
+        await jev.aclose()
+
+    return worker, engine, controller
+
+
+async def run_session(transport: BaseTransport, shared: SharedResources, session_id: str | None = None) -> None:
+    worker, _, _ = build_session(transport, shared, session_id=session_id)
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(worker)
+    await runner.run()

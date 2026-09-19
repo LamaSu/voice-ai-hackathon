@@ -20,6 +20,7 @@ class BotState(BaseModel):
     started_at: float | None = None
     current_sentence: str = ""
     spoken_text: str = ""  # words of the current response actually played so far
+    response_done: bool = True  # LLM response end frame has reached the output transport
 
 
 class UserState(BaseModel):
