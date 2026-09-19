@@ -13,6 +13,80 @@ We ship a live voice agent that notices a user getting confused mid-explanation,
 
 **Submission:** register on hackathon.new, link this repo (no repo, not judged), add a demo video or live demo plan. One submission per team; teams are 2–4 people. Deadline **6:00 PM sharp**. The repo must be public by then.
 
+## Status board — 14:40, Sat Sept 19
+
+Updated by the lane D agent. Replace this block wholesale at each standup; do not let it go stale.
+
+**One-line state:** the engine is built and tested, nothing talks end to end yet, and the demo behaviour
+(#5) is unstaffed. We are behind on the pipeline and at risk on the thing we are being judged for.
+
+| Checkpoint | Due | State |
+| --- | --- | --- |
+| Walking skeleton | 1:00 PM | 🔴 **late** — providers, state, Jev policy done and tested; pipeline and controller not wired |
+| `user_state` flowing, HUD, Gradium usage | 2:30 PM | 🟡 HUD done and verified; nothing consumes `user_state`; Gradium usage unchecked |
+| Staged confusion → back up and probe | 3:30 PM | 🔴 **not started, unclaimed** (#5) |
+| Feature freeze | 4:30 PM | — |
+| Dress rehearsal + backup recording | 5:15 PM | — |
+| Repo public, README, submitted | 5:45 PM | — |
+
+**Lane status**
+
+| Lane | Owner | State |
+| --- | --- | --- |
+| A. Voice pipeline | Akash (acting) | 🟡 active on #1, `voice/1-jev-interaction-engine`. Engine green on 27 unit tests; pipeline being wired. ETA requested. |
+| B. Reasoning | **unstaffed** | 🔴 #4, #5, #6, #7 all untouched. **#5 is the demo.** |
+| C. Perception | folded into B | 🔴 nothing. `frontend/src/gaze/` reserved. |
+| D. Integration and demo | rg | 🟢 #11 and #12 done and in review; #13, #14 pending; #15 needs a human at the venue. |
+
+**Three decisions waiting on a human**
+
+1. **Who takes #5.** It is the demo moment and nobody has claimed it. If it stays unclaimed past ~3:00
+   it stops being a staffing problem and becomes a scope decision.
+2. **Which LLM** — blocked on #15. `gemma-4-31B-it` ≈ 3.5 s TTFT cannot meet the target;
+   `minimax-m2.7` ≈ 0.4 s can, but nobody has confirmed it runs on SambaNova hardware. Fast and
+   ineligible scores nothing. Needed before freeze.
+3. **Contracts 1–4 vs `InteractionState`** — the engine implements none of the four. Either emit them
+   at the edges (models are in `backend/app/contracts.py`) or formally replace them with a
+   `contract-change` issue. Leaving it implicit means lane C writes an emitter nothing reads.
+
+**Known single point of failure:** `backend/app/config.py` *requires* `JEV_API_KEY`, so the backend will
+not boot without it. The policy layer already falls back cleanly when Jev is unavailable — only the
+startup check is in the way. Asked on #1.
+
+**Process, honestly:** `main` has taken one direct push, two agents duplicated #1 because neither
+claimed first, and status comments are not happening. The rules in `CLAUDE.md` exist because three
+agents share one repo. New joiners: read [ONBOARDING.md](ONBOARDING.md).
+
+## Getting started
+
+New here? Read [ONBOARDING.md](ONBOARDING.md) first — it has the live status, the open decisions and
+the lane boundaries. Then, in order:
+
+1. **Accept your repo invite.** The repo is private until submission; the invite is at
+   https://github.com/LamaSu/voice-ai-hackathon/invitations. Nothing works until you accept.
+2. **Take a lane.** Three people, so lane C folds into lane B: one person on A, one on B + C, rg on D.
+   Pick one open issue with your lane's label, comment `claimed by <name>`, add `in-progress`, and only
+   then start. Two agents already duplicated work by skipping this.
+3. **Get the keys.** `GENERAL_COMPUTE_API_KEY` and `GRADIUM_API_KEY` come **by DM only** — never in an
+   issue, a PR, a commit or an agent prompt. They live in `.env`, which is git-ignored, and nowhere else.
+4. **Set up.**
+   ```bash
+   cp .env.example .env            # paste the keys you were DM'd
+   cd backend && uv sync && uv run pytest
+   cd ../frontend && npm install && npm run dev
+   ```
+5. **Install the docs server once per machine**, and query it before guessing a Pipecat API:
+   ```bash
+   uv tool install "pipecat-ai[cli]"
+   pipecat context-hub install
+   ```
+6. **A1 comes first.** Until the walking skeleton runs end to end, every other lane is writing against
+   something it cannot test. If A1 is blocked, help unblock it before starting your own task.
+
+Gradium is on rg's account: 145,000 credits, Free plan, **overages off**, so the service simply stops
+when the credits run out. Keep automated tests on short clips, and use `frontend` replay mode
+(`?replay=1`) rather than a live call when you only need to see the HUD.
+
 ## Lanes
 
 Each lane has one human owner who directs its agents and merges their PRs. Agents never merge to `main` or work outside their lane.
@@ -80,6 +154,9 @@ Newest first. Any change to a contract, lane scope, or the demo script goes here
 
 | When | Decision | Why | By |
 | --- | --- | --- | --- |
+| Sept 19, 14:20 | Build on the Jev-driven interaction engine (`voice/1-jev-interaction-engine`), not the stock Pipecat quickstart | Most Technical Implementation counts depth double. A custom interruption-first controller with a deterministic policy layer, typed fan-out decisions and graceful Jev-unavailable fallbacks is a far stronger submission than the quickstart, and it already exists with 27 green unit tests. Rebuilding a simpler path would cost hours we do not have before the 4:30 freeze. | rg (delegated to lane D agent) |
+| Sept 19, 14:20 | **Open:** Contracts 1–4 vs the engine's `InteractionState` | The engine implements none of the four cross-lane contracts. Per rule 3 this needs a `contract-change` issue and every lane owner's sign-off before it lands on `main`. Until then, anything crossing a lane uses `backend/app/contracts.py`. | pending rg |
+| Sept 19, 14:20 | **Open:** which LLM | Measured TTFT is gemma-4-31B-it ≈ 3.5 s vs minimax-m2.7 ≈ 0.4 s (#16), so the model named in the quickstart cannot meet the latency target. Blocked on #15: whichever we pick must be confirmed as SambaNova-served, or we lose eligibility, which costs more than the latency. | pending rg |
 | Sept 19 | GitHub repo is the coordination hub; issues are the task board | Everyone and every agent already has access | rg |
 | Pre-event | Face features via MediaPipe on the client; no microexpressions | Webcams are too slow for them and the science is weak | rg |
 | Pre-event | Emotion signals are a prior, confirmed by probe questions | Readings are noisy; mismatches are the signal | rg |

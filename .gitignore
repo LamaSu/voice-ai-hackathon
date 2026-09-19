@@ -18,3 +18,7 @@ backend/tests/fixtures/*.wav
 backend/pretrained_models/
 frontend/dist/
 .pytest_cache/
+
+# lane D
+metrics.jsonl
+.venv-lane-d/
