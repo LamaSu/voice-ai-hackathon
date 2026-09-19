@@ -76,3 +76,10 @@ canvas#spark { width: 100%; height: 64px; margin-top: 14px; display: block; }
 .log li { display: grid; grid-template-columns: 62px 1fr; gap: 10px; padding: 3px 0; }
 .log .who { color: var(--muted); font-size: 11px; text-transform: uppercase; padding-top: 2px; }
 .log-error .what { color: var(--poor); }
+
+.unmute {
+  display: block; width: 100%; margin-top: 10px; padding: 10px;
+  background: var(--fair); color: #1a1205; border: 0; border-radius: 6px;
+  font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.unmute[hidden] { display: none; }

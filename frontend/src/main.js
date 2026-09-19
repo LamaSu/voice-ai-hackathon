@@ -20,6 +20,8 @@ const els = {
   connect: document.getElementById("connect"),
   state: document.getElementById("state"),
   cam: document.getElementById("cam"),
+  botAudio: document.getElementById("botAudio"),
+  unmute: document.getElementById("unmute"),
   mic: document.getElementById("mic"),
   camToggle: document.getElementById("camToggle"),
   log: document.getElementById("log"),
@@ -53,7 +55,11 @@ client.on(RTVIEvent.ServerMessage, (msg) => {
 });
 
 client.on(RTVIEvent.TrackStarted, (track, participant) => {
-  if (participant?.local && track.kind === "video") showLocalVideo(track);
+  if (participant?.local) {
+    if (track.kind === "video") showLocalVideo(track);
+    return; // never play our own mic back at ourselves
+  }
+  if (track.kind === "audio") playBotAudio(track);
 });
 
 els.connect.addEventListener("click", async () => {
@@ -72,6 +78,10 @@ els.connect.addEventListener("click", async () => {
   }
 });
 
+els.unmute.addEventListener("click", () => {
+  els.botAudio.play().then(() => els.unmute.setAttribute("hidden", ""));
+});
+
 els.mic.addEventListener("change", (e) => client.enableMic(e.target.checked));
 els.camToggle.addEventListener("change", (e) => {
   client.enableCam(e.target.checked);
@@ -80,6 +90,21 @@ els.camToggle.addEventListener("change", (e) => {
 
 function showLocalVideo(track) {
   els.cam.srcObject = new MediaStream([track]);
+}
+
+function playBotAudio(track) {
+  els.botAudio.srcObject = new MediaStream([track]);
+  // Browsers block audible autoplay until the page has a user gesture. Clicking
+  // Connect usually counts, but not on every browser or after a reload, and a
+  // silently rejected play() is indistinguishable from a broken pipeline.
+  els.botAudio.play().then(
+    () => els.unmute.setAttribute("hidden", ""),
+    (err) => {
+      log("system", "browser blocked audio — click “enable sound”");
+      console.warn("autoplay blocked:", err);
+      els.unmute.removeAttribute("hidden");
+    },
+  );
 }
 
 function setState(state) {
