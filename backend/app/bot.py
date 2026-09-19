@@ -40,6 +40,7 @@ from app.perception.speaker_id import SpeakerIdProcessor, new_speaker_memory
 from app.perception.vision import apply_faces, apply_gaze, apply_user_state
 from app.services import SYSTEM_PROMPT, make_llm, make_stt, make_tts
 from app.state.engine import StateEngine
+from app.telemetry import SessionTelemetry
 from app.state.interaction_state import ConversationState, SpeakerState
 from app.turns.controller import InteractionController
 from app.turns.policy import is_introduction
@@ -231,6 +232,11 @@ def build_session(
     hud.attach(latency_observer)
 
     engine.add_publisher(send_to_client)
+    telemetry = SessionTelemetry(session_id, BACKEND_DIR / "logs", settings=s)
+    engine.add_publisher(telemetry.publisher())
+    # Contract 4 samples land in the session log too, so a slow turn can be read
+    # next to the Jev decision and transcript that produced it.
+    hud.add_sink(telemetry.metrics_publisher())
     log_writer, log_fh, log_path = _jsonl_logger(session_id)
     engine.add_publisher(log_writer)
     for p in extra_publishers or []:
@@ -246,6 +252,10 @@ def build_session(
     async def on_client_message(rtvi, msg):
         if msg.type == "user_state" and isinstance(msg.data, dict):
             apply_user_state(engine, msg.data)  # Contract 1 (lane C)
+        elif msg.type == "client_log" and isinstance(msg.data, dict):
+            # Browser-side trouble (autoplay blocked, MediaPipe down, WebRTC) is
+            # invisible server-side and dies with the console. Land it on disk.
+            telemetry.client_log(msg.data)
         elif msg.type == "faces" and isinstance(msg.data, dict):
             apply_faces(engine, msg.data)  # per-face gaze for everyone in frame
         elif msg.type == "gaze" and isinstance(msg.data, dict):

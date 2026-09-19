@@ -17,6 +17,32 @@ import { MSG_METRICS } from "./contracts.js";
 
 const hud = new LatencyHUD(document);
 
+// --- browser telemetry -----------------------------------------------------
+// Autoplay blocks, MediaPipe failures and WebRTC trouble all happen here and
+// would otherwise die in a console nobody has open. Ship them to the session
+// log so `scripts/diagnose.py` can show them beside the server's view.
+function report(level, message, extra = {}) {
+  try {
+    if (client?.connected) {
+      client.sendClientMessage("client_log", {
+        level,
+        message: String(message).slice(0, 2000),
+        at: new Date().toISOString(),
+        ...extra,
+      });
+    }
+  } catch {
+    /* telemetry must never break the call */
+  }
+}
+
+window.addEventListener("error", (e) =>
+  report("error", e.message, { source: e.filename, line: e.lineno }),
+);
+window.addEventListener("unhandledrejection", (e) =>
+  report("error", `unhandled rejection: ${e.reason}`),
+);
+
 const els = {
   connect: document.getElementById("connect"),
   state: document.getElementById("state"),
@@ -127,6 +153,7 @@ function playBotAudio(track) {
     (err) => {
       log("system", "browser blocked audio — click “enable sound”");
       console.warn("autoplay blocked:", err);
+      report("warn", `autoplay blocked: ${err?.name ?? err}`);
       els.unmute.removeAttribute("hidden");
     },
   );

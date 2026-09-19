@@ -48,6 +48,7 @@ class LatencyHUD:
         self._samples_ms: list[float] = []
         self._content_ms: list[float] = []
         self._content = None
+        self._sinks: list = []
 
     @property
     def samples_ms(self) -> list[float]:
@@ -67,6 +68,10 @@ class LatencyHUD:
         if len(ordered) % 2:
             return ordered[mid]
         return (ordered[mid - 1] + ordered[mid]) / 2
+
+    def add_sink(self, sink) -> None:
+        """Also deliver every sample here (session telemetry, tests)."""
+        self._sinks.append(sink)
 
     def median_content_ms(self) -> float | None:
         """Median end-of-speech-to-answer, the number that survives a filler."""
@@ -150,7 +155,13 @@ class LatencyHUD:
         else:
             logger.info(f"end of speech → first audio: {total_ms} ms (median {self.median_ms()} ms)")
         self._append_to_log(sample)
-        await self._send({"type": MSG_METRICS, "payload": sample.model_dump()})
+        message = {"type": MSG_METRICS, "payload": sample.model_dump()}
+        await self._send(message)
+        for sink in self._sinks:
+            try:
+                await sink(message)
+            except Exception as exc:  # noqa: BLE001 - a sink must never break a turn
+                logger.warning(f"metrics sink failed: {exc}")
         return sample
 
     def _append_to_log(self, sample: Metrics) -> None:
