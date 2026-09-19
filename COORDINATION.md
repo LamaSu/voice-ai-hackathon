@@ -13,56 +13,58 @@ We ship a live voice agent that notices a user getting confused mid-explanation,
 
 **Submission:** register on hackathon.new, link this repo (no repo, not judged), add a demo video or live demo plan. One submission per team; teams are 2–4 people. Deadline **6:00 PM sharp**. The repo must be public by then.
 
-## Status board — 16:05, Sat Sept 19
+## Status board — 16:55, Sat Sept 19
 
-Updated by the lane D agent. Replace this block wholesale at each standup; do not let it go stale.
+Updated by the lane D agent. Replace this block wholesale at each standup.
 
-**One-line state:** everything is built and merged; `main` is green and carries the whole demo path.
-The one thing standing between us and the prize we are targeting is **latency: ~3 s live against a
-1.5 s "phone tree" line.** Eligibility (#15) is still unverified.
+**One-line state:** `main` finally carries the whole demo path and is green. Latency is fixed
+(1830 ms → ~500 ms). Two live bugs remain, one fixed and unmerged. **Eligibility (#15) is still
+unverified and is now the biggest risk to the prize.**
 
 | Checkpoint | Due | State |
 | --- | --- | --- |
-| Walking skeleton | 1:00 PM | ✅ done (late) |
-| `user_state` flowing, HUD, Gradium usage | 2:30 PM | ✅ HUD live; `user_state` reaching the reasoner. Gradium credit usage still unchecked. |
-| Staged confusion → back up and probe | 3:30 PM | 🟡 trigger + picker merged (#5, #6). Needs a live run to confirm the repair fires on stage. |
-| Feature freeze | 4:30 PM | **now** |
-| Dress rehearsal + backup recording | 5:15 PM | ⬜ see `docs/DEMO_RUNBOOK.md` |
+| Feature freeze | 4:30 PM | passed; only fixes since |
+| Dress rehearsal + backup recording | 5:15 PM | ⬜ **next** — `docs/DEMO_RUNBOOK.md`, gate on `./scripts/preflight.sh --live` |
 | Repo public, README, submitted | 5:45 PM | ⬜ **ask rg before making the repo public** |
 
-### Latency — the one number that matters now
+### Merged into `main` (9a84b57), verified green: 105 backend, 25 frontend
 
-Live is **~3 s** end of speech to first audio. Findings, so nobody re-derives them:
+- **Latency 1830 ms → ~500 ms median** (best 361 ms): spoken fillers, Jev hold timeout 2.0→1.1 s,
+  end-of-turn budget 0.6→1.2 s, `gpt-oss-120b` for `minimax-m2.7`, shorter prompt.
+- Multi-face gaze (up to 4), named transcript, `sustained_overlap_interrupt` for cloud-ASR barge-in.
+- Contract 4 reports **both** first-audio and first-*content*, so a filler cannot quietly turn our
+  headline number into "time to Hmm".
+- Session telemetry + `scripts/diagnose.py`, `scripts/where_time_goes.py`, `scripts/preflight.sh`,
+  `docs/DEMO_RUNBOOK.md`.
 
-- **`delay_in_frames=7` is already the floor** (Gradium allows 7, 8, 10, 12…; default 12). That is a
-  **560 ms inherent ASR lookahead** we cannot configure away. `VADParams(stop_secs=0.3)` is likewise
-  already tight. **There is no quick transcription win.**
-- **The LLM is not the long pole.** minimax TTFT ≈ 0.4 s of ~3 s. Inference going to zero still leaves
-  ~2.5 s. Time is in speech synthesis, text aggregation, and that ASR floor.
-- **Therefore SambaNova will not fix this.** We already run on whatever hardware General Compute uses;
-  #15 is an *eligibility* fact, not a performance lever. Answering it changes no number.
-- `scripts/where_time_goes.py` ranks the stages from `metrics.jsonl`. **Run it before changing
-  anything** — it takes 30 s and stops us optimising the wrong row.
-- Structural win, already half-built and still open: **#7 / B4, reason on partial transcripts.**
-  `InteractionController._early_eot()` already responds on interim text, but only when Jev returns
-  RESPOND; otherwise we wait `EOT_FINAL_WAIT_S = 1.0` for Gradium's final.
-- Not for today: Gradium STT has **native turn detection** (`enable_turn_detection`) we don't use,
-  running Silero VAD + Jev + a 1 s wait instead. Collapsing those is the right post-event answer.
+### Open bug, fix ready and unmerged
 
-### Known limits, so we describe them accurately at the table
+**The agent speaks its own reasoning.** `gpt-oss-120b` streams chain of thought inline in `<think>`
+tags — Pipecat's Groq service documents exactly this for the GPT-OSS family — and nothing stripped
+it, so it reached TTS. `ReasoningFilter` on the TTS service removes it. It is stateful on purpose:
+streaming splits `<think>` across chunks and a per-chunk regex leaks the very text it removes.
+Deliberately **not** done: passing `reasoning_effort` to the API. It cannot be tested from here and
+an unsupported parameter would 400 every request and take the demo down.
 
-- **One face only.** `numFaces: 1` in `frontend/src/gaze/index.ts`, and only `faceBlendshapes[0]` is
-  read. Contract 1 has no multi-face representation either, so this is a contract change, not a flag.
-- **Second speakers need time.** `min_new_speaker_seconds=1.5`, `late_new_speaker_min_seconds=2.5`.
-  A short interjection from a second voice gets absorbed into the first speaker rather than getting
-  its own profile.
+### Known limits — describe these accurately rather than be caught out
 
-### Open, and needing a human rather than an agent
+- **The answer floor is ~0.9 s** (TTFT + TTS + endpointing). Below that the honest answer is a
+  cached filler, not a faster model. Quote **both** HUD numbers.
+- **TTFT moves with provider load.** Our two measurements disagree about which model is faster
+  (#16 had minimax ahead, #21 has gpt-oss ahead). Re-run `scripts/latency_check.py --trials 9`
+  close to judging rather than quoting an hour-old figure.
+- **Confusion reaches Jev but no Jev question asks about it.** `confusion_p` is in the state block;
+  the repair trigger is deterministic (`decide_probe`/`ConfusionTracker`). Accurate answer: the
+  model reasons about *whether you are addressing it* from gaze; the confusion trigger is code.
+- Second speakers need 1.5–2.5 s of speech before getting their own voice profile.
 
-1. **#15 — is `minimax-m2.7` served on SN40/SN50?** Unanswered by everyone asked; the API does not say.
-   Someone at the General Compute table has to answer it in writing. Fast and ineligible scores zero.
-2. **Gradium credits.** 145,000 on a Free plan with overages off — service simply stops when they run
-   out. Nobody has checked the balance since kickoff, and the rehearsal will spend some.
+### Still needing a human, not an agent
+
+1. **#15 — is any General Compute model served on SN40/SN50?** We have now shipped on three
+   different models and confirmed nothing. This is the eligibility gate: fast and ineligible scores
+   zero, slow and eligible still places. **Highest-value hour of human time left.**
+2. **Gradium credits.** 145,000, Free plan, overages off — service stops dead when they run out, and
+   the rehearsal will spend some. Nobody has checked the balance since kickoff.
 
 ## Getting started
 
