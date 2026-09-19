@@ -12,7 +12,7 @@ import { SmallWebRTCTransport } from "@pipecat-ai/small-webrtc-transport";
 
 import { LatencyHUD } from "./hud.js";
 import { mountJevPanels } from "./jev/panels.js";
-import { MSG_METRICS } from "./contracts.js";
+import { MSG_METRICS, MSG_USER_STATE } from "./contracts.js";
 
 const hud = new LatencyHUD(document);
 
@@ -85,11 +85,41 @@ els.unmute.addEventListener("click", () => {
 els.mic.addEventListener("change", (e) => client.enableMic(e.target.checked));
 els.camToggle.addEventListener("change", (e) => {
   client.enableCam(e.target.checked);
-  if (!e.target.checked) els.cam.srcObject = null;
+  if (!e.target.checked) {
+    els.cam.srcObject = null;
+    gazeTracker?.stop();
+    gazeTracker = null;
+  }
 });
 
 function showLocalVideo(track) {
   els.cam.srcObject = new MediaStream([track]);
+  startFaceTracking();
+}
+
+// Lane C (#8). MediaPipe runs on the camera track we already opened, and only
+// numbers leave this module — the frames never go near the network. That is
+// the design in COORDINATION.md and our answer to the privacy question at
+// judging.
+let gazeTracker = null;
+async function startFaceTracking() {
+  if (gazeTracker) return;
+  try {
+    const { createGazeTracker } = await import("./gaze/index.ts");
+    gazeTracker = await createGazeTracker({
+      video: els.cam,
+      onUserState: (state) => {
+        if (client.connected) client.sendClientMessage(MSG_USER_STATE, state);
+      },
+    });
+    log("system", "face tracking on — user_state at ~10 Hz");
+  } catch (err) {
+    // The demo must survive this. MediaPipe pulls a wasm bundle and a model
+    // from a CDN, and venue wifi is the likeliest thing to fail today. Without
+    // it the agent loses the confusion prior and still converses.
+    console.warn("face tracking unavailable:", err);
+    log("system", "face tracking unavailable — running without the confusion prior");
+  }
 }
 
 function playBotAudio(track) {
