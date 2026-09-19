@@ -16,6 +16,45 @@ calls `onUserState(state)` at ~10 Hz with exactly the `user_state` shape from **
 
 Only numbers cross this boundary — no video or image data is ever passed to `onUserState`.
 
+## Pipeline: face detection → `user_state`
+
+```
+<video> frame
+  → FaceLandmarker.detectForVideo()          (MediaPipe, GPU delegate)
+      → faceBlendshapes[0].categories        52 named scores in [0, 1]
+      → facialTransformationMatrixes[0]      4x4 head-pose matrix
+  → extractAURaw(blendshapes)                gaze/blendshapes.ts
+  → BaselineTracker.addSample/.delta()       gaze/baseline.ts   (30s window)
+  → matrixToEulerDeg(matrix)                 gaze/headPose.ts   → yaw/pitch/roll
+  → isGazeAway(yaw, pitch)                   gaze/headPose.ts
+  → NodDetector.addSample(pitch)             gaze/headPose.ts
+  → estimateConfusion(auDelta, gazeAway)     gaze/confusion.ts
+  → estimateWantsTurn(mouthOpenDelta, gazeAway)
+  → UserState (Contract 1)                   gaze/sampler.ts
+```
+
+Field-by-field, where each part of `user_state` comes from:
+
+| `user_state` field | Source signal | How it's computed |
+| --- | --- | --- |
+| `t_ms` | `performance.now()` at capture time | passed straight through |
+| `au.brow_lower` | Blendshapes `browDownLeft` + `browDownRight` | averaged, then baseline-deltad |
+| `au.lip_press` | Blendshapes `mouthPressLeft` + `mouthPressRight` | averaged, then baseline-deltad |
+| `gaze_away` | Head yaw/pitch, from the facial transformation matrix | `\|yaw\| > 20°` or `\|pitch\| > 15°`; also `true` whenever no face is detected |
+| `nod` | Head pitch history over a rolling 1.5s window | counts down→up pitch reversals of ≥8° as completed nods |
+| `wants_turn` | Blendshape `jawOpen` (mouth-open delta) + `gaze_away` | `true` when mouth-open delta > 0.15 **and** the user is looking at the camera |
+| `prosody_delta.*` | — (audio, not video) | always `{0, 0, 0}`; stub for C3 (#10) |
+| `confusion_p` | `au.brow_lower`, `au.lip_press`, `gaze_away` | `clamp01(0.6·brow_lower + 0.4·lip_press − 0.15 if gaze_away)` — a face-only prior, not a verdict |
+
+The **baseline** (Contract 1: "deltas from the user's own baseline, captured in the first 30 seconds")
+is a running mean over each raw AU signal for the first 30s of samples, then frozen. Before it locks,
+deltas are computed against the running mean so far rather than raw values, so `user_state` is always
+valid, just noisier during calibration.
+
+Thresholds above (20°/15° for gaze-away, 8° for nod swings, 0.15 for wants-turn, the 0.6/0.4/0.15
+weights for confusion) are starting points picked without ground-truth data — tune them in
+`gaze/headPose.ts` and `gaze/confusion.ts` once someone can validate against a real face.
+
 Known stubs, left for other issues rather than guessed at here:
 - `prosody_delta` is always zero. It's audio-derived and belongs to C3 (#10, optional prosody fusion).
 - `confusion_p` is a face-only heuristic (brow lower + lip press, penalized when looking away). It's
