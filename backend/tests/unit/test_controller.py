@@ -355,11 +355,12 @@ async def test_reset_all_clears_people_profiles_and_sessions(tmp_path):
     import numpy as np
 
     from app.bot import SharedResources
-    from app.config import get_settings
     from app.memory.store import MemoryStore
 
     shared = SharedResources.__new__(SharedResources)
-    shared.settings = get_settings()
+    # No settings here on purpose: reset_all() never reads them, and building
+    # real Settings calls _require(), which needs a populated .env. That made
+    # this test pass only on a machine holding the live keys.
     shared.memory = MemoryStore(tmp_path / "m.json")
     from app.perception.speaker_id import new_speaker_memory
 
