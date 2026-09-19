@@ -13,6 +13,36 @@ We ship a live voice agent that notices a user getting confused mid-explanation,
 
 **Submission:** register on hackathon.new, link this repo (no repo, not judged), add a demo video or live demo plan. One submission per team; teams are 2–4 people. Deadline **6:00 PM sharp**. The repo must be public by then.
 
+## Getting started
+
+New here? Read [ONBOARDING.md](ONBOARDING.md) first — it has the live status, the open decisions and
+the lane boundaries. Then, in order:
+
+1. **Accept your repo invite.** The repo is private until submission; the invite is at
+   https://github.com/LamaSu/voice-ai-hackathon/invitations. Nothing works until you accept.
+2. **Take a lane.** Three people, so lane C folds into lane B: one person on A, one on B + C, rg on D.
+   Pick one open issue with your lane's label, comment `claimed by <name>`, add `in-progress`, and only
+   then start. Two agents already duplicated work by skipping this.
+3. **Get the keys.** `GENERAL_COMPUTE_API_KEY` and `GRADIUM_API_KEY` come **by DM only** — never in an
+   issue, a PR, a commit or an agent prompt. They live in `.env`, which is git-ignored, and nowhere else.
+4. **Set up.**
+   ```bash
+   cp .env.example .env            # paste the keys you were DM'd
+   cd backend && uv sync && uv run pytest
+   cd ../frontend && npm install && npm run dev
+   ```
+5. **Install the docs server once per machine**, and query it before guessing a Pipecat API:
+   ```bash
+   uv tool install "pipecat-ai[cli]"
+   pipecat context-hub install
+   ```
+6. **A1 comes first.** Until the walking skeleton runs end to end, every other lane is writing against
+   something it cannot test. If A1 is blocked, help unblock it before starting your own task.
+
+Gradium is on rg's account: 145,000 credits, Free plan, **overages off**, so the service simply stops
+when the credits run out. Keep automated tests on short clips, and use `frontend` replay mode
+(`?replay=1`) rather than a live call when you only need to see the HUD.
+
 ## Lanes
 
 Each lane has one human owner who directs its agents and merges their PRs. Agents never merge to `main` or work outside their lane.
@@ -80,6 +110,9 @@ Newest first. Any change to a contract, lane scope, or the demo script goes here
 
 | When | Decision | Why | By |
 | --- | --- | --- | --- |
+| Sept 19, 14:20 | Build on the Jev-driven interaction engine (`voice/1-jev-interaction-engine`), not the stock Pipecat quickstart | Most Technical Implementation counts depth double. A custom interruption-first controller with a deterministic policy layer, typed fan-out decisions and graceful Jev-unavailable fallbacks is a far stronger submission than the quickstart, and it already exists with 27 green unit tests. Rebuilding a simpler path would cost hours we do not have before the 4:30 freeze. | rg (delegated to lane D agent) |
+| Sept 19, 14:20 | **Open:** Contracts 1–4 vs the engine's `InteractionState` | The engine implements none of the four cross-lane contracts. Per rule 3 this needs a `contract-change` issue and every lane owner's sign-off before it lands on `main`. Until then, anything crossing a lane uses `backend/app/contracts.py`. | pending rg |
+| Sept 19, 14:20 | **Open:** which LLM | Measured TTFT is gemma-4-31B-it ≈ 3.5 s vs minimax-m2.7 ≈ 0.4 s (#16), so the model named in the quickstart cannot meet the latency target. Blocked on #15: whichever we pick must be confirmed as SambaNova-served, or we lose eligibility, which costs more than the latency. | pending rg |
 | Sept 19 | GitHub repo is the coordination hub; issues are the task board | Everyone and every agent already has access | rg |
 | Pre-event | Face features via MediaPipe on the client; no microexpressions | Webcams are too slow for them and the science is weak | rg |
 | Pre-event | Emotion signals are a prior, confirmed by probe questions | Readings are noisy; mismatches are the signal | rg |
