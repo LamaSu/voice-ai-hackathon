@@ -27,7 +27,10 @@ def _require(*names: str) -> str:
 class Settings:
     gradium_api_key: str = field(default_factory=lambda: _require("GRADIUM_API_KEY"))
     general_compute_api_key: str = field(default_factory=lambda: _require("GENERAL_COMPUTE", "GENERAL_COMPUTE_API_KEY"))
-    jev_api_key: str = field(default_factory=lambda: _require("JEV_API_KEY", "TYPESAFE_API_KEY"))
+    # Optional: without a key the controller falls back to the deterministic policy rules.
+    jev_api_key: str | None = field(
+        default_factory=lambda: (os.getenv("JEV_API_KEY") or os.getenv("TYPESAFE_API_KEY") or "").strip() or None
+    )
 
     general_compute_base_url: str = os.getenv(
         "GENERAL_COMPUTE_BASE_URL", "https://api.generalcompute.com/v1"

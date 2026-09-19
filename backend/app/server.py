@@ -6,6 +6,7 @@ Run: uv run python -m app.server
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -40,7 +41,7 @@ async def lifespan(app: FastAPI):
     jev = shared.new_jev()
     try:
         await jev.warmup()
-        logger.info("Jev reachable")
+        logger.info("Jev ready" if shared.settings.jev_api_key else "Jev disabled (no key)")
     finally:
         await jev.aclose()
     yield
@@ -53,7 +54,12 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 @app.get("/api/health")
 async def health():
     s = get_settings()
-    return {"ok": True, "llm_model": s.llm_model, "jev_model": s.jev_model, "speaker_id": s.enable_speaker_id}
+    return {
+        "ok": True,
+        "llm_model": s.llm_model,
+        "jev_model": s.jev_model if s.jev_api_key else None,
+        "speaker_id": s.enable_speaker_id,
+    }
 
 
 @app.get("/api/memory")
@@ -82,6 +88,18 @@ async def offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
 async def ice(request: SmallWebRTCPatchRequest):
     await handler.handle_patch_request(request)
     return {"status": "success"}
+
+
+if os.getenv("DEV_FIXTURES") == "1":
+    # Dev only: lets a browser test harness play the Gradium-voiced test clips as a fake mic.
+    from fastapi.responses import FileResponse
+
+    @app.get("/api/dev/fixture/{name}.wav")
+    async def fixture(name: str):
+        path = (REPO_DIR / "backend" / "tests" / "fixtures" / f"{name}.wav").resolve()
+        if not path.is_file() or path.parent.name != "fixtures":
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return FileResponse(path, media_type="audio/wav")
 
 
 _dist = REPO_DIR / "frontend" / "dist"

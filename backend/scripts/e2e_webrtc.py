@@ -236,7 +236,7 @@ async def main() -> int:
         t_bc0, t_bc1 = await say("yeah")
         await asyncio.sleep(1.2)
         still = ear.speaking_at(time.perf_counter(), window=0.6)
-        bc_events = [e for e in events[n_before:] if e.get("type") == "turn"]
+        bc_events = [e for e in events[n_before:] if e.get("type") == "interaction"]
         results["backchannel_bot_kept_talking"] = still
         results["backchannel_turn_events"] = [e.get("event") for e in bc_events]
         if any(e.get("event") == "interrupt" for e in bc_events):
@@ -251,7 +251,7 @@ async def main() -> int:
             t_i0, t_i1 = await say("interrupt")
             await asyncio.sleep(0.8)
             stopped_at = ear.silent_since(t_i0, hold=0.4)
-            int_events = [e for e in events[n_before:] if e.get("type") == "turn" and e.get("event") == "interrupt"]
+            int_events = [e for e in events[n_before:] if e.get("type") == "interaction" and e.get("event") == "interrupt"]
             if int_events:
                 results["interrupt_decision_after_speech_start_s"] = round(int_events[0]["_rx"] - t_i0, 2)
                 results["interrupt_reason"] = int_events[0].get("reason")

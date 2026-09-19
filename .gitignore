@@ -22,3 +22,5 @@ frontend/dist/
 # lane D
 metrics.jsonl
 .venv-lane-d/
+.playwright-mcp/
+metrics.jsonl

@@ -19,3 +19,20 @@ def apply_gaze(engine: StateEngine, data: dict[str, Any]) -> None:
     v.head_pitch = float(data.get("head_pitch", 0.0) or 0.0)
     v.head_roll = float(data.get("head_roll", 0.0) or 0.0)
     v.updated_at = engine.now()
+
+
+def apply_user_state(engine: StateEngine, data: dict[str, Any]) -> None:
+    """Contract 1 `user_state` (lane C, ~10 Hz) -> VisionState."""
+    v = engine.state.vision
+    v.enabled = True
+    v.face_present = True
+    v.looking_at_agent = not bool(data.get("gaze_away", False))
+    v.gaze_confidence = 0.8
+    v.wants_turn = bool(data.get("wants_turn", False))
+    v.confusion_p = float(data.get("confusion_p", 0.0) or 0.0)
+    v.nod = int(data.get("nod", 0) or 0)
+    au = data.get("au") or {}
+    if isinstance(au, dict):
+        top = sorted(((k, float(x)) for k, x in au.items() if isinstance(x, (int, float))), key=lambda kv: -abs(kv[1]))
+        v.au = {k: round(x, 2) for k, x in top[:4]}
+    v.updated_at = engine.now()

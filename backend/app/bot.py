@@ -23,17 +23,20 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.processors.audio.vad_processor import VADProcessor
+from pipecat.processors.frameworks.rtvi import RTVIObserverParams
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
 from app.config import BACKEND_DIR, Settings, get_settings
-from app.jev.client import JevClient, JevResult
+from app.jev.client import JevClient, JevResult, NullJev
+from app.observers.latency_hud import LatencyHUD
 from app.memory.store import MemoryLLM, MemoryStore
 from app.perception.bot_tap import BotTap
 from app.perception.speaker_id import SpeakerIdProcessor
-from app.perception.vision import apply_gaze
+from app.perception.vision import apply_gaze, apply_user_state
 from app.services import SYSTEM_PROMPT, make_llm, make_stt, make_tts
 from app.state.engine import StateEngine
 from app.turns.controller import InteractionController
@@ -62,8 +65,11 @@ class SharedResources:
                 self._embedder = EcapaEmbedder()
             return self._embedder
 
-    def new_jev(self) -> JevClient:
+    def new_jev(self) -> JevClient | NullJev:
         s = self.settings
+        if not s.jev_api_key:
+            logger.warning("JEV_API_KEY not set: interaction decisions use deterministic fallbacks only")
+            return NullJev()
         return JevClient(s.jev_api_key, s.jev_model, timeout_s=s.jev_timeout_s)
 
 
@@ -119,9 +125,9 @@ def build_session(
         context.set_messages(msgs)
 
     async def before_respond(text: str, speaker_label: str | None) -> str:
+        # Who is speaking goes into the system prompt, not the transcript text (keeps the UI clean).
         refresh_system_prompt(speaker_label)
-        who = memory.display_name(speaker_label)
-        return f"[{who}] {text}" if who else text
+        return text
 
     async def on_turn_accepted(text: str, speaker_label: str | None, r: JevResult | None) -> None:
         if not is_introduction(r):
@@ -136,7 +142,7 @@ def build_session(
             logger.info(f"memory: {speaker_label} is {name}")
         else:
             memory.pending_name = name  # bound on the next confident speaker decision
-        await engine.publish("turn", event="introduction", speaker=speaker_label, name=name)
+        await engine.publish("interaction", event="introduction", speaker=speaker_label, name=name)
         await publish_memory()
 
     vad = VADProcessor(
@@ -172,14 +178,23 @@ def build_session(
             assistant_agg,
         ]
     )
+    latency_observer = UserBotLatencyObserver()
     worker = PipelineWorker(
         pipeline,
         params=PipelineParams(audio_in_sample_rate=16000, enable_metrics=True),
         idle_timeout_secs=None,
+        observers=[latency_observer],
+        # The UI should only see user text the controller accepted as a turn, not raw Gradium
+        # interims/finals (backchannels, echo) — so the STT is an ignored RTVI source.
+        rtvi_observer_params=RTVIObserverParams(ignored_sources=[stt]),
     )
 
     async def send_to_client(event: dict[str, Any]) -> None:
         await worker.rtvi.send_server_message(event)
+
+    # Contract 4 `metrics` via lane D's LatencyHUD (end of speech -> first audio, per-stage breakdown)
+    hud = LatencyHUD(send_to_client)
+    hud.attach(latency_observer)
 
     engine.add_publisher(send_to_client)
     log_writer, log_fh, log_path = _jsonl_logger(session_id)
@@ -195,7 +210,9 @@ def build_session(
 
     @worker.rtvi.event_handler("on_client_message")
     async def on_client_message(rtvi, msg):
-        if msg.type == "gaze" and isinstance(msg.data, dict):
+        if msg.type == "user_state" and isinstance(msg.data, dict):
+            apply_user_state(engine, msg.data)  # Contract 1 (lane C)
+        elif msg.type == "gaze" and isinstance(msg.data, dict):
             apply_gaze(engine, msg.data)
         elif msg.type == "reset_memory":
             memory.people.clear()

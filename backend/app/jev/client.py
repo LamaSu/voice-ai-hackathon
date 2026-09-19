@@ -92,3 +92,17 @@ class JevClient:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+
+class NullJev:
+    """Used when no Jev key is configured: every question is unanswered, so the policy's
+    deterministic fallbacks (hard-stop words, overlap cap, punctuation/silence) decide."""
+
+    async def ask(self, state: dict[str, Any], questions: dict[str, Any]) -> JevResult:
+        return JevResult(ok=False, error="jev_disabled")
+
+    async def warmup(self) -> None:
+        return None
+
+    async def aclose(self) -> None:
+        return None

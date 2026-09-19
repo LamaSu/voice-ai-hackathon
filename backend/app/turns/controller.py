@@ -13,6 +13,7 @@ dropped and never reach the LLM context.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -35,6 +36,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 import re
 
+from app.contracts import MSG_TURN, Turn
 from app.jev.client import JevLike, JevResult
 from app.jev.questions import END_OF_TURN_QUESTIONS, OVERLAP_QUESTIONS, to_jev_state
 from app.state.engine import StateEngine
@@ -140,6 +142,7 @@ class InteractionController(FrameProcessor):
         # True from RESPOND until the bot's response has fully played (or was interrupted).
         # Covers LLM latency and the gaps between TTS sentences.
         self._awaiting_bot = False
+        self._interrupted_this_turn = False  # Contract 2: final turn carries interrupted=true
 
     # ------------------------------------------------------------------ helpers
     @property
@@ -171,7 +174,15 @@ class InteractionController(FrameProcessor):
 
     async def _turn_event(self, event: str, **kw: Any) -> None:
         await self._engine.publish(
-            "turn", event=event, speaker=self.s.speaker.name or self.s.speaker.label, **kw
+            "interaction", event=event, speaker=self.s.speaker.name or self.s.speaker.label, **kw
+        )
+
+    async def _contract_turn(self, kind: str, text: str, interrupted: bool = False) -> None:
+        """Contract 2 `turn` (A -> B) at the edge, in the COORDINATION.md envelope."""
+        stopped = self.s.user.speech_stopped_at
+        t_end = int((time.time() - (self._now() - stopped)) * 1000) if stopped and kind == "final" else None
+        await self._engine.publish_contract(
+            MSG_TURN, Turn(kind=kind, text=text, t_speech_end_ms=t_end, interrupted=interrupted).model_dump()
         )
 
     # ------------------------------------------------------------------ frame routing
@@ -306,6 +317,7 @@ class InteractionController(FrameProcessor):
     # ------------------------------------------------------------------ transcripts
     async def _on_interim(self, frame: InterimTranscriptionFrame) -> None:
         text = frame.text
+        await self._contract_turn("partial", text)
         if self._discarded_text and _norm(text).startswith(self._discarded_text):
             text = _strip_prefix(text, self._discarded_text)
         self.s.user.partial_transcript = text
@@ -497,6 +509,7 @@ class InteractionController(FrameProcessor):
         if self.s.bot.spoken_text:
             self.s.conversation.last_bot_turn = self.s.bot.spoken_text + " [interrupted]"
         await self.push_frame(InterruptionFrame())
+        self._interrupted_this_turn = True
         await self._open_turn()
         self.s.bot.speaking = False
         self._engine.set_phase(Phase.LISTENING)
@@ -621,6 +634,8 @@ class InteractionController(FrameProcessor):
         self._cancel("_thinking_task")
         self._thinking_task = self.create_task(self._thinking_watch(), "thinking_watch")
         await self._turn_event("user_turn_end", text=text)
+        await self._contract_turn("final", text, interrupted=self._interrupted_this_turn)
+        self._interrupted_this_turn = False
         await self._engine.publish("transcript", role="user", text=text,
                                    speaker=self.s.speaker.name or self.s.speaker.label)
         if self._on_turn_accepted:

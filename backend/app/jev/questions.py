@@ -140,5 +140,9 @@ def to_jev_state(
             "gaze_confidence": _r(s.vision.gaze_confidence),
             "head_yaw_deg": _r(s.vision.head_yaw, 1),
             "head_pitch_deg": _r(s.vision.head_pitch, 1),
+            "wants_turn": s.vision.wants_turn,
+            "confusion_p": _r(s.vision.confusion_p),
+            "nod": s.vision.nod,
+            "face_action_units": s.vision.au,
         }
     return out

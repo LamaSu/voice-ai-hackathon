@@ -203,9 +203,11 @@ class MemoryLLM:
                     "You maintain memory for a voice assistant. Given the previous summary, known people and "
                     "the newest exchange, return JSON with keys: "
                     '"summary" (<= 80 words, third person, keep important details from before; refer to people '
-                    "by name or they/them, never guess gender), "
+                    "by name or they/them only: never use he, she, him, her, his, hers, himself, herself), "
                     '"new_facts" (object mapping speaker_label -> list of NEW short durable facts about that '
-                    "person, e.g. preferences, plans, relationships; empty if none).",
+                    "person, e.g. preferences, plans, relationships; empty if none). Facts start with the "
+                    "person's name (never he/she/him/her/his/hers) and must be about the person's life, not about this "
+                    "conversation, the assistant, name spelling, or transcription. Do not repeat known facts.",
                     prompt,
                 )
             except Exception as e:  # noqa: BLE001

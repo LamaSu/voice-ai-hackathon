@@ -1,6 +1,6 @@
 # Architecture: Jev-driven, interruption-first multimodal voice agent
 
-> Status: **in progress**. The provider layer, state model, Jev question sets and policy are built and tested. The Pipecat pipeline, controller, speaker ID and frontend are being wired now; see [Build status](#build-status).
+> Status: **working end to end**: voice in, a Jev turn decision, General Compute, Gradium TTS, voice out, over real WebRTC. It's verified by `backend/scripts/e2e_webrtc.py` and in a browser; see [Build status](#build-status).
 
 ## Core idea
 
@@ -38,7 +38,7 @@ Every key is read from the repo-root `.env`:
 
 ```
 transport.input()            SmallWebRTC; the mic stays open while the bot talks (full duplex); browser AEC
- → RTVIProcessor             (added by PipelineWorker) client messages {type:"gaze"} → VisionState
+ → RTVIProcessor             (added by PipelineWorker) client message `user_state` (Contract 1, lane C) → VisionState
  → VADProcessor(Silero)      VAD frames are SIGNALS ONLY; they also make Gradium STT flush for final text
  → SpeakerIdProcessor        ECAPA every 0.4 s on the rolling 1.5 s window → live speaker; full-utterance classify at VAD stop
  → GradiumSTTService         always streaming, including during bot speech
@@ -53,7 +53,9 @@ transport.input()            SmallWebRTC; the mic stays open while the bot talks
 
 **Why the controller holds transcripts.** Pipecat's user aggregator appends *every* `TranscriptionFrame` to the next user message. The controller buffers the final transcripts of the current utterance and forwards them only when that speech has become a user turn. Backchannels, echo and side talk are dropped and never reach the LLM context. This is also why the user's first words aren't lost at an interruption: the speech was transcribed while Jev was deciding, and the whole utterance is released once Jev says INTERRUPT.
 
-**Interruption** = `ProposedUserStartedSpeakingFrame`. The External start strategy broadcasts an `InterruptionFrame`, which cancels the in-flight LLM request, drops the TTS audio context, and drains the output transport's audio queue. These are the three things that must stop.
+**Interruption.** The controller pushes an `InterruptionFrame` **downstream only**. That cancels the in-flight LLM request, drops the TTS audio context and drains the output transport's audio queue, which are the three things that must stop. The STT's pending transcripts upstream are untouched. The controller then pushes `ProposedUserStartedSpeakingFrame`; the aggregator uses `ExternalUserTurnStrategies(enable_interruptions=False)`, so opening a turn never interrupts by itself.
+
+**Early end of turn.** Gradium's final transcript arrives about 0.9 s after the VAD-stop flush. While the user is silent, the controller asks Jev (set B) on each new partial transcript and responds as soon as Jev says the turn is complete. The late final is then dropped, and any tail of it that leaks into the next utterance is stripped.
 
 ## Interaction state machine
 
@@ -92,7 +94,7 @@ The Jev state is a compact JSON snapshot built by `to_jev_state()`:
 - `user`: speaker, speaker_confidence, speaking, speech_ms, silence_ms, partial_transcript, word_count, energy
 - `audio.overlap_ms`
 - `conversation`: last_user_turn, last_bot_turn
-- `vision` (only when the camera is on): face_present, looking_at_agent, gaze_confidence, head_yaw_deg, head_pitch_deg
+- `vision` (only once lane C's `user_state` arrives): face_present, looking_at_agent (= !gaze_away), wants_turn, confusion_p, nod, face_action_units
 
 Validated live in `backend/tests/live/test_jev_live.py`:
 
@@ -130,11 +132,16 @@ The server sends events to the browser through RTVI server messages (`rtvi.send_
 | --- | --- | --- |
 | `state` | about 10 Hz | `state`: phase, bot_speaking, bot_sentence, user_vad, user_speech_ms, user_energy, partial, speaker {label, name, confidence, probabilities}, vision |
 | `jev` | every Jev call | `set` (overlap / end_of_turn / turn_start), `answers` {nouls, choices with probabilities}, `latency_ms`, `decision` {action, reason}, `text` |
-| `turn` | turn events | `event`: user_turn_start / user_turn_end / interrupt / backchannel / drop / hold; plus `text` and `speaker` |
+| `interaction` | turn-taking events | `event`: user_turn_start / user_turn_end / interrupt (with `interrupted: true`) / backchannel / noise / drop / hold / introduction; plus `text`, `reason` and `speaker` |
+| `vad` | VAD edges | `speaking`: true or false |
+| `turn` | **Contract 2** | `{type: "turn", payload: {kind: partial or final, text, t_speech_end_ms, interrupted}}` |
+| `metrics` | **Contract 4** | `{type: "metrics", payload: {...}}` from lane D's `LatencyHUD` |
 | `transcript` | final user or bot text | `role`, `text`, `speaker` |
 | `memory` | when memory changes | `people`: [{label, name, speech_seconds, facts}], `summary` |
 
-Client to server: `client.sendClientMessage("gaze", {face_present, looking_at_agent, gaze_confidence, gaze_x, gaze_y, head_yaw, head_pitch, head_roll})` at about 10 Hz.
+Client to server:
+- `client.sendClientMessage("user_state", <Contract 1>)` at about 10 Hz (lane C)
+- `client.sendClientMessage("reset_memory", {})`, which the memory panel's "Forget everyone" button sends
 
 ## Layout
 
@@ -170,8 +177,32 @@ cd ../frontend && npm install && npm run dev    # web app (once it lands)
 
 - [x] Provider smoke tests: Jev, Gradium TTS/STT, General Compute
 - [x] InteractionState, StateEngine, Jev question sets and serializer
-- [x] Policy, with 27 unit tests and 12 live Jev tests
-- [ ] Pipecat pipeline, server and InteractionController
-- [ ] ECAPA speaker ID, people memory and conversation memory
-- [ ] Frontend: speaker panel, Jev probability bars, turn timeline, memory panel, MediaPipe gaze
-- [ ] Headless end-to-end interruption test using Gradium-generated audio fixtures
+- [x] Policy (pure, table-tested) plus the InteractionController (Pipecat processor) with a fake-Jev test suite
+- [x] Pipecat 1.11 pipeline and SmallWebRTC server (`app/bot.py`, `app/server.py`)
+- [x] Speaker ID: ECAPA plus WhoSpeaksLive SpeakerMemory, with live and final decisions and stitching of unknown utterances
+- [x] People memory, with names bound from Jev's `introducing_self`, and a rolling summary from General Compute. Voice profiles persist across sessions.
+- [x] Contracts at the edges: Contract 2 `turn` (partial and final, `interrupted`) and Contract 4 `metrics`, through lane D's `LatencyHUD` and `UserBotLatencyObserver`. Contract 1 `user_state` is consumed into the Jev state.
+- [x] Jev key is optional: `NullJev` means the deterministic policy fallbacks decide.
+- [x] Web panels (`frontend/src/jev/`): who is speaking with per-speaker probabilities, Jev probability bars with policy thresholds, a turn-taking timeline, and people/summary memory
+- [ ] MediaPipe face features: lane C, #8 (`frontend/src/gaze/`), sent as Contract 1
+
+### Measured, with the WebRTC end-to-end test (aiortc client, Gradium-voiced user)
+
+| What | Result |
+| --- | --- |
+| Jev p50 | 200–270 ms |
+| Backchannel ("Yeah.") while the bot talks | Classified `backchannel`, and the bot keeps talking |
+| Barge-in ("Actually, can you make it about a cat instead?") | Bot audio stops **0.86–1.1 s after the user starts speaking**. About 0.9 s of that is Gradium's first-word latency (delay_in_frames=7); Jev adds about 0.25 s. Hard-stop words skip Jev. |
+| End of speech to first bot audio | 1.2–2.5 s. The stages are VAD 0.3 s, ASR catch-up about 0.4 s, Jev about 0.2 s on the partial transcript (early end of turn), LLM about 0.5 s and TTS about 0.35 s. |
+| Two different voices | Separated into S1 and S2 (ECAPA same-voice cosine 0.67–0.83, different voices 0.19–0.33). Both names were bound. |
+
+### Tests
+
+```bash
+cd backend
+uv run pytest                                            # 60 unit + e2e-scenario tests (fake Jev, no network)
+uv run pytest -m live tests/live -s                      # 12 real-Jev decision tests
+uv run python scripts/make_fixtures.py                   # Gradium-voiced user clips (once)
+DEV_FIXTURES=1 uv run python -m app.server &             # server + built frontend on :7860
+uv run python scripts/e2e_webrtc.py                      # real WebRTC end to end: intro, backchannel, barge-in, 2 speakers
+```

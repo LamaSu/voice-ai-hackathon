@@ -52,6 +52,11 @@ class VisionState(BaseModel):
     head_yaw: float = 0.0
     head_pitch: float = 0.0
     head_roll: float = 0.0
+    # Contract 1 user_state extras (lane C)
+    wants_turn: bool = False
+    confusion_p: float = 0.0
+    nod: int = 0
+    au: dict[str, float] = Field(default_factory=dict)
     updated_at: float | None = None
 
 

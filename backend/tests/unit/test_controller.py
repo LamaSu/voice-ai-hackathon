@@ -106,7 +106,7 @@ async def test_simple_turn_responds():
         "TranscriptionFrame",
         "ProposedUserStoppedSpeakingFrame",
     ]
-    assert [e["event"] for e in events if e["type"] == "turn"] == ["user_turn_start", "user_turn_end"]
+    assert [e["event"] for e in events if e["type"] == "interaction"] == ["user_turn_start", "user_turn_end"]
     assert engine.state.phase.value == "thinking"
 
 
@@ -125,7 +125,7 @@ async def test_backchannel_does_not_interrupt_or_reach_llm():
         ],
     )
     assert names(down) == []
-    turn_events = [e["event"] for e in events if e["type"] == "turn"]
+    turn_events = [e["event"] for e in events if e["type"] == "interaction"]
     assert "backchannel" in turn_events and "interrupt" not in turn_events
     assert engine.state.phase.value == "bot_speaking"
 
@@ -154,7 +154,7 @@ async def test_barge_in_interrupts_then_responds_with_full_utterance():
     ]
     released = [f for f in down if isinstance(f, TranscriptionFrame)][0]
     assert released.text == "No, I said Saturday."  # first words not lost
-    interrupt = [e for e in events if e["type"] == "turn" and e["event"] == "interrupt"][0]
+    interrupt = [e for e in events if e["type"] == "interaction" and e["event"] == "interrupt"][0]
     assert interrupt["interrupted"] is True
 
 
@@ -172,7 +172,7 @@ async def test_hard_stop_interrupts_without_waiting_for_jev():
         send_end_frame=True,
     )
     assert names(down)[:2] == ["InterruptionFrame", "ProposedUserStartedSpeakingFrame"]
-    ev = [e for e in events if e["type"] == "turn" and e["event"] == "interrupt"][0]
+    ev = [e for e in events if e["type"] == "interaction" and e["event"] == "interrupt"][0]
     assert ev["reason"] == "hard_stop_phrase"
 
 
@@ -187,7 +187,7 @@ async def test_incomplete_turn_holds_then_times_out_into_response():
             SleepFrame(0.6),
         ],
     )
-    turn_events = [e["event"] for e in events if e["type"] == "turn"]
+    turn_events = [e["event"] for e in events if e["type"] == "interaction"]
     assert turn_events.index("hold") < turn_events.index("user_turn_end")
     jev_actions = [e["decision"]["action"] for e in events if e["type"] == "jev"]
     assert jev_actions == ["hold", "respond"]
@@ -228,7 +228,7 @@ async def test_side_talk_is_dropped():
         ],
     )
     assert names(down) == []
-    assert any(e["type"] == "turn" and e["event"] == "drop" for e in events)
+    assert any(e["type"] == "interaction" and e["event"] == "drop" for e in events)
 
 
 async def test_bot_finished_response_after_backchannel_does_not_create_turn():
@@ -310,3 +310,42 @@ async def test_interim_answered_text_does_not_leak_into_next_turn():
     )
     released = [f.text for f in down if isinstance(f, TranscriptionFrame)]
     assert released == ["Hi, my name is Priya.", "What's the weather tomorrow?"]
+
+
+async def test_contract2_turn_emitted_with_interrupted_flag():
+    ctrl, engine, events = make()
+    await run_test(
+        ctrl,
+        frames_to_send=[
+            BotStartedSpeakingFrame(),
+            VADUserStartedSpeakingFrame(),
+            interim("no I said Saturday"),
+            SleepFrame(0.2),
+            VADUserStoppedSpeakingFrame(),
+            tr("No, I said Saturday."),
+            SleepFrame(0.2),
+        ],
+    )
+    turns = [e["payload"] for e in events if e["type"] == "turn"]
+    assert turns[0]["kind"] == "partial"
+    final = [t for t in turns if t["kind"] == "final"]
+    assert final and final[-1]["interrupted"] is True and final[-1]["text"] == "No, I said Saturday."
+    assert final[-1]["t_speech_end_ms"] is not None
+
+
+async def test_null_jev_uses_deterministic_fallbacks():
+    from app.jev.client import NullJev
+
+    ctrl, engine, events = make(jev=NullJev())
+    down, _ = await run_test(
+        ctrl,
+        frames_to_send=[
+            VADUserStartedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            tr("What's the weather tomorrow?"),
+            SleepFrame(0.2),
+        ],
+    )
+    assert names(down)[-1] == "ProposedUserStoppedSpeakingFrame"
+    jev = [e for e in events if e["type"] == "jev"]
+    assert jev[-1]["decision"]["reason"].startswith("fallback")

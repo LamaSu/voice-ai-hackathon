@@ -11,6 +11,7 @@ import { PipecatClient, RTVIEvent } from "@pipecat-ai/client-js";
 import { SmallWebRTCTransport } from "@pipecat-ai/small-webrtc-transport";
 
 import { LatencyHUD } from "./hud.js";
+import { mountJevPanels } from "./jev/panels.js";
 import { MSG_METRICS } from "./contracts.js";
 
 const hud = new LatencyHUD(document);
@@ -41,6 +42,9 @@ const client = new PipecatClient({
     onError: (err) => log("error", String(err?.message ?? err)),
   },
 });
+
+// Lane A panels (speaker, Jev probabilities, turn timeline, memory).
+mountJevPanels(client, document.getElementById("jev-panels"));
 
 // Contract 4 arrives as an RTVI server message: {type: "metrics", payload: {...}}.
 client.on(RTVIEvent.ServerMessage, (msg) => {

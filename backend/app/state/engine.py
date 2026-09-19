@@ -53,6 +53,14 @@ class StateEngine:
             except Exception as e:  # noqa: BLE001 - UI failures must never break the pipeline
                 logger.warning(f"publisher failed for {event_type}: {e}")
 
+    async def publish_contract(self, msg_type: str, payload: dict[str, Any]) -> None:
+        """Cross-lane contracts (COORDINATION.md) use the {type, payload} envelope."""
+        for pub in list(self._publishers):
+            try:
+                await pub({"type": msg_type, "payload": payload})
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"publisher failed for contract {msg_type}: {e}")
+
     async def publish_snapshot(self, force: bool = False) -> None:
         now = self.now()
         if not force and now - self._last_snapshot < self._snapshot_interval:
