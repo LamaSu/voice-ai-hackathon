@@ -8,3 +8,13 @@ node_modules/
 .DS_Store
 *.log
 recordings/
+
+# voice agent
+# external checkouts (e.g. KoljaB/WhoSpeaksLive); needed code is vendored in backend/app/perception/whospeaks
+projects/
+backend/logs/
+backend/data/
+backend/tests/fixtures/*.wav
+backend/pretrained_models/
+frontend/dist/
+.pytest_cache/

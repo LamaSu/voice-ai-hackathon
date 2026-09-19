@@ -1,0 +1,75 @@
+import pytest
+
+from app.jev.client import JevResult
+from app.turns.policy import Action, decide_end_of_turn, decide_overlap, is_hard_stop, is_introduction
+
+
+def overlap_result(intent, conf, wants_floor=0.2, correcting=0.1, addressed=0.8):
+    return JevResult(
+        nouls={"wants_floor": wants_floor, "correcting_agent": correcting, "addressed_to_agent": addressed},
+        choices={"intent": {"choice": intent, "confidence": conf, "probabilities": {}}},
+    )
+
+
+def eot_result(nxt, conf, complete, addressed=0.9, intro=0.0):
+    return JevResult(
+        nouls={"turn_complete": complete, "addressed_to_agent": addressed, "introducing_self": intro},
+        choices={"next": {"choice": nxt, "confidence": conf, "probabilities": {}}},
+    )
+
+
+@pytest.mark.parametrize(
+    "result,text,speech_s,expected",
+    [
+        (overlap_result("interrupt", 0.9, wants_floor=0.9), "no I said Saturday", 0.6, Action.INTERRUPT),
+        (overlap_result("backchannel", 0.95), "yeah", 0.3, Action.CONTINUE),
+        (overlap_result("backchannel", 0.9, wants_floor=0.9), "mm-hm", 0.3, Action.CONTINUE),
+        (overlap_result("echo", 0.8), "tomorrow will be sunny", 0.8, Action.CONTINUE),
+        (overlap_result("noise", 0.7), "uh", 0.2, Action.CONTINUE),
+        (overlap_result("side_talk", 0.8, addressed=0.1), "honey can you grab that", 1.0, Action.CONTINUE),
+        (overlap_result("backchannel", 0.4, correcting=0.8), "that's not right", 0.7, Action.INTERRUPT),
+        (overlap_result("backchannel", 0.4, wants_floor=0.8), "hmm but", 0.4, Action.INTERRUPT),
+        (overlap_result("side_talk", 0.87, wants_floor=0.8, addressed=0.1), "honey did you feed the dog", 1.2, Action.CONTINUE),
+        (overlap_result("side_talk", 0.4), "so what about", 0.5, Action.WAIT),
+        (overlap_result("side_talk", 0.4), "so what about the other one", 1.8, Action.INTERRUPT),
+        (overlap_result("backchannel", 0.9), "wait a second", 0.3, Action.INTERRUPT),  # hard stop wins
+        (None, "so what about", 0.5, Action.WAIT),
+        (None, "so what about the other one", 1.6, Action.INTERRUPT),
+        (JevResult(ok=False, error="timeout"), "stop", 0.2, Action.INTERRUPT),
+    ],
+)
+def test_decide_overlap(result, text, speech_s, expected):
+    assert decide_overlap(result, text=text, speech_s=speech_s).action == expected
+
+
+@pytest.mark.parametrize(
+    "result,text,silence_s,expected",
+    [
+        (eot_result("respond_now", 0.9, 0.9), "what's the weather tomorrow?", 0.3, Action.RESPOND),
+        (eot_result("wait_for_more", 0.8, 0.3), "I was thinking that maybe", 0.3, Action.HOLD),
+        (eot_result("wait_for_more", 0.8, 0.3), "I was thinking that maybe", 2.1, Action.RESPOND),
+        (eot_result("wait_for_more", 0.6, 0.9), "book it for Saturday", 0.4, Action.RESPOND),
+        (eot_result("ignore", 0.9, 0.9, addressed=0.1), "honey where are the keys", 0.4, Action.DROP),
+        (eot_result("ignore", 0.9, 0.9, addressed=0.6), "where are the keys", 0.4, Action.RESPOND),
+        (eot_result("respond_now", 0.9, 0.9), "", 0.4, Action.HOLD),
+        (None, "what time is it?", 0.2, Action.RESPOND),
+        (None, "and then", 0.3, Action.HOLD),
+        (None, "and then", 0.9, Action.RESPOND),
+    ],
+)
+def test_decide_end_of_turn(result, text, silence_s, expected):
+    assert decide_end_of_turn(result, text=text, silence_s=silence_s).action == expected
+
+
+def test_hard_stop():
+    assert is_hard_stop("Stop.")
+    assert is_hard_stop("wait, what?")
+    assert is_hard_stop("hold on a sec")
+    assert not is_hard_stop("I can't wait for Saturday")
+    assert not is_hard_stop("yeah")
+
+
+def test_introduction():
+    assert is_introduction(eot_result("respond_now", 0.9, 0.9, intro=0.9))
+    assert not is_introduction(eot_result("respond_now", 0.9, 0.9, intro=0.2))
+    assert not is_introduction(None)
