@@ -33,7 +33,7 @@ from pipecat.workers.runner import WorkerRunner
 from app.config import BACKEND_DIR, Settings, get_settings
 from app.jev.client import JevClient, JevResult, NullJev
 from app.observers.latency_hud import LatencyHUD
-from app.memory.store import MemoryLLM, MemoryStore
+from app.memory.store import MemoryLLM, MemoryStore, regex_name
 from app.perception.bot_tap import BotTap
 from app.perception.speaker_id import SpeakerIdProcessor, new_speaker_memory
 from app.perception.vision import apply_gaze, apply_user_state
@@ -145,7 +145,10 @@ def build_session(
         return text
 
     async def on_turn_accepted(text: str, speaker_label: str | None, r: JevResult | None) -> None:
-        if not is_introduction(r):
+        # Jev's introducing_self is the main signal, but it isn't available when a Jev call
+        # times out (and the policy answered from its fallback rules), so accept a plain
+        # "my name is X" too — otherwise a slow Jev silently costs us the name.
+        if not is_introduction(r) and not regex_name(text):
             return
         name = await shared.memory_llm.extract_name(text)
         if not name:

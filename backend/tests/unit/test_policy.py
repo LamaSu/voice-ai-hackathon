@@ -121,3 +121,14 @@ def test_decide_probe(confusion_p, consecutive_high, bot_speaking, already_probi
     )
     assert decision.action == expected
     assert decision.reason == reason
+
+
+def test_regex_name_is_the_fallback_when_jev_is_unavailable():
+    """Name binding must survive a Jev timeout (bot.on_turn_accepted uses both signals)."""
+    from app.memory.store import regex_name
+
+    assert regex_name("Hi there, my name is Priya.") == "Priya"
+    assert regex_name("hello, I'm Marcus") == "Marcus"
+    assert regex_name("call me Akash") == "Akash"
+    assert regex_name("What's the capital of Japan?") is None
+    assert regex_name("I'm going to the shops") is None
