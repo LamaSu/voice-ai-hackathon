@@ -20,6 +20,11 @@
       <section class="grid">
         <div class="panel video-panel">
           <video id="cam" autoplay playsinline muted></video>
+          <!-- The bot's voice. Without this element the audio track arrives over
+               WebRTC and is never played, so the agent looks alive in the
+               transcript and is silent in the room. -->
+          <audio id="botAudio" autoplay playsinline></audio>
+          <button id="unmute" class="unmute" hidden>🔇 Click to enable sound</button>
           <p class="note">
             Camera stays in this browser. Face landmarks become numbers
             (<code>user_state</code>); no video is sent to the server.
