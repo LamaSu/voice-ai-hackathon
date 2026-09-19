@@ -43,8 +43,6 @@ class Settings:
     host: str = os.getenv("HOST", "127.0.0.1")
     port: int = int(os.getenv("PORT", "7860"))
     enable_speaker_id: bool = os.getenv("ENABLE_SPEAKER_ID", "1") == "1"
-    # "parakeet" = local MLX Parakeet TDT 0.6B v3 (backend/models/), "gradium" = cloud STT
-    stt_engine: str = os.getenv("STT_ENGINE", "parakeet")
     # Cached spoken fillers ("Hmm", "Got it") played while the LLM generates
     enable_fillers: bool = os.getenv("ENABLE_FILLERS", "1") == "1"
 

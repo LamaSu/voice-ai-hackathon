@@ -32,12 +32,18 @@ class PolicyConfig:
     addressed_min: float = 0.3
     overlap_cap_s: float = 1.5
     overlap_cap_words: int = 3
+    # Cloud ASR delivers the first word ~0.9s late, so waiting for text to decide a barge-in
+    # feels sluggish. Speech that keeps going past this is longer than a backchannel
+    # ("yeah", "mm-hm", "right" are all shorter), so it interrupts on duration alone —
+    # unless Jev has already called this utterance a backchannel.
+    overlap_duration_s: float = 0.8
+    overlap_min_energy: float = 0.03  # ignore AEC residue of the bot's own voice
     turn_complete: float = 0.6
     turn_complete_strong: float = 0.85
     respond_prob: float = 0.35  # p(respond_now) needed when Jev's top choice is wait_for_more
     ignore_conf: float = 0.6
     hold_max_silence_s: float = 1.1
-    fallback_respond_silence_s: float = 0.8
+    fallback_respond_silence_s: float = 0.5
     introducing_self: float = 0.6
     # Jev spreads probability across the filler styles (any of them would be fine), so the
     # decision is "is silence right?" (p(none)), not the top style's confidence.
@@ -61,6 +67,15 @@ _HARD_STOP = re.compile(
 
 def is_hard_stop(text: str) -> bool:
     return bool(_HARD_STOP.search(text.strip()))
+
+
+def sustained_overlap_interrupt(
+    *, speech_s: float, energy: float, resolved_passive: bool, cfg: PolicyConfig = PolicyConfig()
+) -> bool:
+    """Barge-in on duration, before the transcript arrives."""
+    if resolved_passive:
+        return False
+    return speech_s >= cfg.overlap_duration_s and energy >= cfg.overlap_min_energy
 
 
 def decide_overlap(

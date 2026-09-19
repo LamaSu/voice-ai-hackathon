@@ -35,9 +35,6 @@ handler = SmallWebRTCRequestHandler()
 async def lifespan(app: FastAPI):
     global shared
     shared = SharedResources()
-    if shared.settings.stt_engine == "parakeet":
-        # load the 2.5 GB STT model before the first call rather than during it
-        asyncio.get_running_loop().run_in_executor(None, shared.parakeet)
     if shared.settings.enable_speaker_id:
         # warm the ECAPA model so the first session has speaker ID immediately
         asyncio.get_running_loop().run_in_executor(None, shared.embedder)
@@ -60,7 +57,7 @@ async def health():
     return {
         "ok": True,
         "llm_model": s.llm_model,
-        "stt": s.stt_engine,
+        "stt": "gradium",
         "jev_model": s.jev_model if s.jev_api_key else None,
         "speaker_id": s.enable_speaker_id,
     }

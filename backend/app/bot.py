@@ -61,8 +61,6 @@ class SharedResources:
         self.sessions: set = set()  # per-session async reset callbacks
         self._embedder = None
         self._embedder_lock = threading.Lock()
-        self._parakeet = None
-        self._parakeet_lock = threading.Lock()
 
     async def reset_all(self) -> dict:
         """Wipe people + voice profiles + summary, and reset every live session's context."""
@@ -83,20 +81,6 @@ class SharedResources:
 
                 self._embedder = EcapaEmbedder()
             return self._embedder
-
-    def parakeet(self):
-        """The local STT model, loaded once and shared by every session."""
-        if self.settings.stt_engine != "parakeet":
-            return None
-        with self._parakeet_lock:
-            if self._parakeet is None:
-                from app.stt_parakeet import DEFAULT_MODEL_DIR, load_model
-
-                if not DEFAULT_MODEL_DIR.exists():
-                    logger.warning(f"parakeet model not found at {DEFAULT_MODEL_DIR}; using Gradium STT")
-                    return None
-                self._parakeet = load_model()
-            return self._parakeet
 
     def new_jev(self) -> JevClient | NullJev:
         s = self.settings
@@ -171,6 +155,7 @@ def build_session(
         name = await shared.memory_llm.extract_name(text)
         if not name:
             return
+        speaker_label = speaker_label or engine.state.speaker.label
         if not speaker_label:
             # ECAPA classifies the utterance just after the VAD stop; on a first, short
             # introduction the label can land a moment after the turn is accepted.
@@ -190,7 +175,7 @@ def build_session(
         await publish_memory()
 
     vad = VADProcessor(
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(start_secs=0.12, stop_secs=0.2, confidence=0.7, min_volume=0.5))
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(start_secs=0.15, stop_secs=0.3, confidence=0.7, min_volume=0.5))
     )
     speaker = SpeakerIdProcessor(
         engine,
@@ -200,7 +185,7 @@ def build_session(
         on_memory_changed=publish_memory,
         speakers=shared.speakers,
     )
-    stt = make_stt(s, shared.parakeet())
+    stt = make_stt(s)
     controller = InteractionController(
         engine,
         jev,

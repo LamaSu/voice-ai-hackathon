@@ -162,3 +162,18 @@ def test_choose_filler_without_jev():
 
     assert choose_filler(None) is None
     assert choose_filler(JevResult(ok=False, error="timeout")) is None
+
+
+@pytest.mark.parametrize(
+    "speech_s,energy,passive,expected",
+    [
+        (0.9, 0.2, False, True),  # still talking past any backchannel: interrupt on duration
+        (0.5, 0.2, False, False),  # short enough to be "yeah" / "mm-hm"
+        (1.2, 0.2, True, False),  # Jev already called it a backchannel
+        (1.2, 0.01, False, False),  # too quiet: AEC residue of the bot's own voice
+    ],
+)
+def test_sustained_overlap_interrupt(speech_s, energy, passive, expected):
+    from app.turns.policy import sustained_overlap_interrupt
+
+    assert sustained_overlap_interrupt(speech_s=speech_s, energy=energy, resolved_passive=passive) is expected

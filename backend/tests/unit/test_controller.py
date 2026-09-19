@@ -33,7 +33,7 @@ class FakeJev:
         self.delay = delay
         self.calls: list[tuple[str, str]] = []
 
-    async def ask(self, state, questions):
+    async def ask(self, state, questions, timeout_s=None):
         await asyncio.sleep(self.delay)
         text = state["user"]["partial_transcript"].lower()
         if questions is OVERLAP_QUESTIONS:
@@ -404,8 +404,8 @@ async def test_filler_is_played_before_the_llm_is_triggered():
     from pipecat.frames.frames import SpeechOutputAudioRawFrame
 
     class FillerJev(FakeJev):
-        async def ask(self, state, questions):
-            r = await super().ask(state, questions)
+        async def ask(self, state, questions, timeout_s=None):
+            r = await super().ask(state, questions, timeout_s)
             if "next" in r.choices:
                 r.choices["filler"] = {
                     "choice": "thinking", "confidence": 0.4,

@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from pipecat.services.gradium.stt import GradiumSTTService
 from pipecat.services.gradium.tts import GradiumTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transcriptions.language import Language
 
 from app.config import Settings
-from app.stt_parakeet import ParakeetSTTService
 
 BOT_NAME = "Jev"
 
@@ -20,10 +17,7 @@ The system prompt names who is speaking; greet people by name when you know it.
 If interrupted, don't repeat yourself — answer the interruption."""
 
 
-def make_stt(s: Settings, parakeet_model: Any = None):
-    """Local Parakeet when available (much lower first-word latency), else Gradium."""
-    if s.stt_engine == "parakeet" and parakeet_model is not None:
-        return ParakeetSTTService(model=parakeet_model, language=Language.EN)
+def make_stt(s: Settings) -> GradiumSTTService:
     return GradiumSTTService(
         api_key=s.gradium_api_key,
         settings=GradiumSTTService.Settings(language=Language.EN, delay_in_frames=7),

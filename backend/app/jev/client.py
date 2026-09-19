@@ -68,11 +68,13 @@ class JevClient:
             timeout=max(timeout_s, 1.0),
         )
 
-    async def ask(self, state: dict[str, Any], questions: dict[str, Any]) -> JevResult:
+    async def ask(
+        self, state: dict[str, Any], questions: dict[str, Any], timeout_s: float | None = None
+    ) -> JevResult:
         t0 = time.perf_counter()
         try:
             resp = await asyncio.wait_for(
-                self._client.system_one(state, questions), timeout=self._timeout_s
+                self._client.system_one(state, questions), timeout=timeout_s or self._timeout_s
             )
         except Exception as e:  # noqa: BLE001 - callers fall back to deterministic rules
             ms = (time.perf_counter() - t0) * 1000
@@ -100,7 +102,9 @@ class NullJev:
     """Used when no Jev key is configured: every question is unanswered, so the policy's
     deterministic fallbacks (hard-stop words, overlap cap, punctuation/silence) decide."""
 
-    async def ask(self, state: dict[str, Any], questions: dict[str, Any]) -> JevResult:
+    async def ask(
+        self, state: dict[str, Any], questions: dict[str, Any], timeout_s: float | None = None
+    ) -> JevResult:
         return JevResult(ok=False, error="jev_disabled")
 
     async def warmup(self) -> None:
