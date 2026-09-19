@@ -76,3 +76,33 @@ async def test_an_unwritable_log_does_not_break_the_demo(sent, tmp_path):
     await hud.record(total_secs=0.4)
 
     assert len(sent) == 1
+
+
+async def test_without_a_filler_first_audio_and_first_content_agree(hud, sent):
+    await hud.record(total_secs=1.6)
+
+    payload = sent[0]["payload"]
+    assert payload["end_of_speech_to_first_audio_ms"] == 1600.0
+    assert payload["end_of_speech_to_first_content_ms"] == 1600.0
+    assert payload["filler"] is None
+
+
+async def test_a_filler_separates_first_sound_from_the_answer(hud, sent):
+    # The point of the split: a cached filler makes the agent audible almost
+    # immediately, but the answer is no earlier than it ever was. Reporting
+    # only the first number would flatter us with something that does not mean
+    # what it looks like.
+    await hud.record(total_secs=0.42, content_secs=2.10, filler="weighing")
+
+    payload = sent[0]["payload"]
+    assert payload["end_of_speech_to_first_audio_ms"] == 420.0
+    assert payload["end_of_speech_to_first_content_ms"] == 2100.0
+    assert payload["filler"] == "weighing"
+
+
+async def test_each_median_is_tracked_separately(hud):
+    for audio, content in ((0.40, 2.0), (0.44, 2.2), (0.42, 2.1)):
+        await hud.record(total_secs=audio, content_secs=content, filler="thinking")
+
+    assert hud.median_ms() == 420.0
+    assert hud.median_content_ms() == 2100.0
