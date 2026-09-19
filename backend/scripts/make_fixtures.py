@@ -27,6 +27,8 @@ CLIPS = {
     "incomplete": (USER_VOICE, "I want to book a table for"),
     "complete_rest": (USER_VOICE, "two people at seven tonight."),
     "second_person": (SECOND_VOICE, "Hello, I'm Marcus. What's the capital of Japan?"),
+    # reliably makes Jev pick a filler (a question worth weighing), for latency A/B
+    "why_purr": (USER_VOICE, "Why do cats purr, actually? Is it always contentment?"),
 }
 
 

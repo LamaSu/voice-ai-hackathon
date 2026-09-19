@@ -132,3 +132,30 @@ def test_regex_name_is_the_fallback_when_jev_is_unavailable():
     assert regex_name("call me Akash") == "Akash"
     assert regex_name("What's the capital of Japan?") is None
     assert regex_name("I'm going to the shops") is None
+
+
+def filler_result(probs):
+    top = max(probs, key=probs.get)
+    return JevResult(choices={"filler": {"choice": top, "confidence": probs[top], "probabilities": probs}})
+
+
+@pytest.mark.parametrize(
+    "probs,expected",
+    [
+        ({"none": 0.87, "acknowledging": 0.12, "thinking": 0.01}, None),  # a command: stay silent
+        ({"none": 0.45, "acknowledging": 0.51, "thinking": 0.04}, None),  # silence plausible
+        ({"none": 0.1, "weighing": 0.29, "acknowledging": 0.24, "thinking": 0.22}, "weighing"),
+        ({"none": 0.2, "thinking": 0.05, "casual": 0.04}, None),  # no style stands out
+    ],
+)
+def test_choose_filler(probs, expected):
+    from app.turns.policy import choose_filler
+
+    assert choose_filler(filler_result(probs)) == expected
+
+
+def test_choose_filler_without_jev():
+    from app.turns.policy import choose_filler
+
+    assert choose_filler(None) is None
+    assert choose_filler(JevResult(ok=False, error="timeout")) is None

@@ -39,6 +39,10 @@ class PolicyConfig:
     hold_max_silence_s: float = 2.0
     fallback_respond_silence_s: float = 0.8
     introducing_self: float = 0.6
+    # Jev spreads probability across the filler styles (any of them would be fine), so the
+    # decision is "is silence right?" (p(none)), not the top style's confidence.
+    filler_none_max: float = 0.4
+    filler_min_prob: float = 0.15
     confusion_threshold: float = 0.6  # confusion_p (Contract 1) at/above this counts as "high"
     confusion_confirm_samples: int = 3  # consecutive high samples (~300ms at 10Hz) before acting
 
@@ -128,6 +132,19 @@ def decide_end_of_turn(
     if complete >= cfg.turn_complete_strong:
         return Decision(Action.RESPOND, "turn_complete_strong")
     return Decision(Action.HOLD, f"incomplete:{complete:.2f}")
+
+
+def choose_filler(r: JevResult | None, cfg: PolicyConfig = PolicyConfig()) -> str | None:
+    """Which cached filler to play while the LLM generates, or None to stay silent."""
+    if not r or not r.ok or "filler" not in r.choices:
+        return None
+    probs = r.choices["filler"].get("probabilities") or {}
+    if not probs:
+        return None
+    if probs.get("none", 0.0) >= cfg.filler_none_max:
+        return None
+    category, p = max(((k, v) for k, v in probs.items() if k != "none"), key=lambda kv: kv[1], default=(None, 0.0))
+    return category if p >= cfg.filler_min_prob else None
 
 
 def is_introduction(r: JevResult | None, cfg: PolicyConfig = PolicyConfig()) -> bool:

@@ -29,7 +29,8 @@ Every key is read from the repo-root `.env`:
 
 | Role | Provider | Notes (measured 2026-09-19 from `backend/scripts/smoke_providers.py`) |
 | --- | --- | --- |
-| ASR | Gradium `wss://api.gradium.ai/api/speech/asr` via `pipecat.services.gradium.stt.GradiumSTTService` | Needs a language (`en`). Interim text streams continuously. The final transcript arrives after a VAD-stop flush. |
+| ASR (default) | **Local Parakeet TDT 0.6B v3** (MLX) via `app/stt_parakeet.py`, weights in `backend/models/` | Streaming, on-device. Text appears ~0.13 s after each 0.24 s chunk, so words reach Jev in ~0.4 s instead of Gradium's ~0.9 s. Real-time factor ~0.55 on an M4. Fed only while VAD hears speech: on silence it invents fillers ("Uh", "Oh"), and one hallucinated word is enough to trigger a false barge-in. |
+| ASR (fallback) | Gradium `wss://api.gradium.ai/api/speech/asr` via `GradiumSTTService` | `STT_ENGINE=gradium`, or automatic when the local weights are missing. Needs a language (`en`); the final transcript arrives after a VAD-stop flush. |
 | TTS | Gradium `wss://api.gradium.ai/api/speech/tts` via `GradiumTTSService` | 48 kHz PCM with word timestamps. First audio in about 0.4–1.0 s. |
 | LLM | General Compute `https://api.generalcompute.com/v1` via Pipecat `OpenAILLMService(base_url=...)` | Time to first token: **minimax-m2.7 ≈ 0.4 s**, gpt-oss-120b 1.6–6.4 s, gemma-4-31B-it ≈ 3.5 s. Default: `minimax-m2.7`, overridable with `LLM_MODEL`. |
 | Interaction decisions | Jev `POST https://api.typesafe.ai/v1/systemone`, model `jev-latest` (currently jev-1.13.0), via `typesafe-sdk` | p50 ≈ 145 ms for a 2–4 question fan-out (range 90–470 ms). Hard timeout of 600 ms, then deterministic fallback. |
@@ -41,7 +42,7 @@ transport.input()            SmallWebRTC; the mic stays open while the bot talks
  → RTVIProcessor             (added by PipelineWorker) client message `user_state` (Contract 1, lane C) → VisionState
  → VADProcessor(Silero)      VAD frames are SIGNALS ONLY; they also make Gradium STT flush for final text
  → SpeakerIdProcessor        ECAPA every 0.4 s on the rolling 1.5 s window → live speaker; full-utterance classify at VAD stop
- → GradiumSTTService         always streaming, including during bot speech
+ → ParakeetSTTService       local streaming ASR (or Gradium); runs during bot speech too
  → InteractionController     the ONLY component that opens or closes user turns or interrupts (uses Jev + policy)
  → LLMUserAggregator         ExternalUserTurnStrategies: turns come only from the controller's Proposed* frames
  → OpenAILLMService          General Compute
@@ -115,6 +116,30 @@ The deterministic rules on top of Jev live in `backend/app/turns/policy.py`:
 - An overlap longer than 1.5 s with 3 or more words interrupts, unless Jev is confident it's a backchannel.
 - After 2.0 s of silence, the agent responds even if Jev said HOLD.
 - Decisions made on stale state are discarded.
+
+## Spoken fillers (perceived latency)
+
+The LLM plus TTS take about 1.2 s to produce the first word of an answer. Instead of silence,
+the agent plays a short cached reaction — "Hmm.", "Got it.", "Give me a sec." — in its own voice.
+
+- **Which one:** Jev picks the category (or `none`) as part of the end-of-turn question set, so it
+  costs no extra round trip. The deterministic gate is p(none): Jev spreads probability across
+  styles because any of them would do, so a top-choice confidence test would almost always say
+  "none". See `choose_filler` in `turns/policy.py`.
+- **Clips:** 49 utterances in 6 categories, generated once by `scripts/make_fillers.py` (Gradium TTS,
+  the bot's voice) into `backend/assets/fillers/`, trimmed of lead-in silence on load.
+- **Playback:** pushed as output audio **before** the frame that triggers the LLM. Pushed after, the
+  clip would queue behind the answer, since the TTS pauses other frames while it generates.
+- **Stopping:** no special case. A barge-in pushes `InterruptionFrame`, which drains the output
+  queue, so the filler stops with everything else.
+- **Measured** (same question, 3 runs each, `scripts/bench_fillers.py`):
+
+  | | First sound the user hears | Answer starts |
+  |---|---|---|
+  | Fillers on | **0.30 s** | 1.55 s |
+  | Fillers off | 1.16 s | 1.16 s |
+
+  Set `ENABLE_FILLERS=0` to turn them off.
 
 ## Speaker ID and memory
 
@@ -190,7 +215,9 @@ cd ../frontend && npm install && npm run dev    # web app (once it lands)
 
 | What | Result |
 | --- | --- |
-| Jev p50 | 200–270 ms |
+| Jev p50 | 140–270 ms |
+| Barge-in, local Parakeet vs cloud Gradium | decision **0.88 s** vs 1.55 s; bot audio stops **1.02 s** vs 1.32 s after the user starts |
+| First sound after a question (filler) | **0.30 s** |
 | Backchannel ("Yeah.") while the bot talks | Classified `backchannel`, and the bot keeps talking |
 | Barge-in ("Actually, can you make it about a cat instead?") | Bot audio stops **0.86–1.1 s after the user starts speaking**. About 0.9 s of that is Gradium's first-word latency (delay_in_frames=7); Jev adds about 0.25 s. Hard-stop words skip Jev. |
 | End of speech to first bot audio | 1.2–2.5 s. The stages are VAD 0.3 s, ASR catch-up about 0.4 s, Jev about 0.2 s on the partial transcript (early end of turn), LLM about 0.5 s and TTS about 0.35 s. |

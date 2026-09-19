@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pipecat.services.gradium.stt import GradiumSTTService
 from pipecat.services.gradium.tts import GradiumTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transcriptions.language import Language
 
 from app.config import Settings
+from app.stt_parakeet import ParakeetSTTService
 
 SYSTEM_PROMPT = """You are Jev, a friendly, quick-witted voice assistant in a live spoken conversation.
 - Your replies are spoken aloud: keep them short (1-3 sentences), natural, no lists, no markdown, no emojis.
@@ -16,7 +19,10 @@ SYSTEM_PROMPT = """You are Jev, a friendly, quick-witted voice assistant in a li
 - When someone introduces themselves, greet them by name and remember it."""
 
 
-def make_stt(s: Settings) -> GradiumSTTService:
+def make_stt(s: Settings, parakeet_model: Any = None):
+    """Local Parakeet when available (much lower first-word latency), else Gradium."""
+    if s.stt_engine == "parakeet" and parakeet_model is not None:
+        return ParakeetSTTService(model=parakeet_model, language=Language.EN)
     return GradiumSTTService(
         api_key=s.gradium_api_key,
         settings=GradiumSTTService.Settings(language=Language.EN, delay_in_frames=7),

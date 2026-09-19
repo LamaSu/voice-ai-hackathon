@@ -25,12 +25,14 @@ class JevResult:
     ok: bool = True
     error: str | None = None
     model: str | None = None
+    reused: bool = False  # answered speculatively before the final transcript arrived
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "nouls": self.nouls,
             "choices": self.choices,
             "latency_ms": round(self.latency_ms),
+            "reused": self.reused,
             "ok": self.ok,
             "error": self.error,
         }

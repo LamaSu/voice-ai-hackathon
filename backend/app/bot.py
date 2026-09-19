@@ -33,6 +33,7 @@ from pipecat.workers.runner import WorkerRunner
 from app.config import BACKEND_DIR, Settings, get_settings
 from app.jev.client import JevClient, JevResult, NullJev
 from app.observers.latency_hud import LatencyHUD
+from app.fillers import FillerLibrary
 from app.memory.store import MemoryLLM, MemoryStore, regex_name
 from app.perception.bot_tap import BotTap
 from app.perception.speaker_id import SpeakerIdProcessor, new_speaker_memory
@@ -56,9 +57,12 @@ class SharedResources:
             self.settings.llm_model,
         )
         self.speakers = new_speaker_memory(self.memory)  # shared by all sessions
+        self.fillers = FillerLibrary() if self.settings.enable_fillers else None
         self.sessions: set = set()  # per-session async reset callbacks
         self._embedder = None
         self._embedder_lock = threading.Lock()
+        self._parakeet = None
+        self._parakeet_lock = threading.Lock()
 
     async def reset_all(self) -> dict:
         """Wipe people + voice profiles + summary, and reset every live session's context."""
@@ -79,6 +83,20 @@ class SharedResources:
 
                 self._embedder = EcapaEmbedder()
             return self._embedder
+
+    def parakeet(self):
+        """The local STT model, loaded once and shared by every session."""
+        if self.settings.stt_engine != "parakeet":
+            return None
+        with self._parakeet_lock:
+            if self._parakeet is None:
+                from app.stt_parakeet import DEFAULT_MODEL_DIR, load_model
+
+                if not DEFAULT_MODEL_DIR.exists():
+                    logger.warning(f"parakeet model not found at {DEFAULT_MODEL_DIR}; using Gradium STT")
+                    return None
+                self._parakeet = load_model()
+            return self._parakeet
 
     def new_jev(self) -> JevClient | NullJev:
         s = self.settings
@@ -174,9 +192,13 @@ def build_session(
         on_memory_changed=publish_memory,
         speakers=shared.speakers,
     )
-    stt = make_stt(s)
+    stt = make_stt(s, shared.parakeet())
     controller = InteractionController(
-        engine, jev, before_respond=before_respond, on_turn_accepted=on_turn_accepted
+        engine,
+        jev,
+        before_respond=before_respond,
+        on_turn_accepted=on_turn_accepted,
+        fillers=shared.fillers,
     )
     llm = make_llm(s)
     tts = make_tts(s)

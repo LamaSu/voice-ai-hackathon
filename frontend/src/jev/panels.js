@@ -264,6 +264,10 @@ export function mountJevPanels(client, root) {
         break;
       }
       case "interaction":
+        if (ev.event === "filler") {
+          logLine(`filler [${ev.category}] “${ev.text}” (${ev.duration_s}s, while the LLM thinks)`, "act-continue");
+          break;
+        }
         if (["interrupt", "backchannel", "drop", "introduction"].includes(ev.event)) {
           const who = ev.speaker ? `${ev.speaker}: ` : "";
           const txt = ev.event === "introduction" ? `${ev.name} introduced (${ev.speaker || "?"})` : `${ev.event} — ${who}${ev.text || ""}`;

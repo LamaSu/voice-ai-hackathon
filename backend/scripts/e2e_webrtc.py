@@ -291,6 +291,8 @@ async def main() -> int:
         failures.append("memory did not bind Marcus")
 
     # ---- summary -----------------------------------------------------------------
+    fillers = [e for e in events if e.get("type") == "interaction" and e.get("event") == "filler"]
+    results["fillers_played"] = [(f["category"], f["text"], f["duration_s"]) for f in fillers]
     jev = evs("jev")
     lat = sorted(e["answers"]["latency_ms"] for e in jev if e.get("answers") and e["answers"].get("ok"))
     results["jev_calls"] = len(jev)

@@ -379,3 +379,78 @@ async def test_reset_all_clears_people_profiles_and_sessions(tmp_path):
     assert shared.speakers.profile_count() == 0
     assert called == [True]
     assert MemoryStore(tmp_path / "m.json").people == {}
+
+
+class FakeFillers:
+    """Stands in for the cached clip library."""
+
+    def __init__(self):
+        self.picked = []
+
+    def available(self):
+        return True
+
+    def pick(self, category):
+        self.picked.append(category)
+        return type("F", (), {
+            "category": category, "text": f"<{category}>", "pcm": b"\x00\x00" * 4800,
+            "sample_rate": 48000, "duration_s": 0.1,
+        })()
+
+
+async def test_filler_is_played_before_the_llm_is_triggered():
+    """The clip must precede the turn-stop frame, or it queues behind the TTS answer."""
+    from pipecat.frames.frames import SpeechOutputAudioRawFrame
+
+    class FillerJev(FakeJev):
+        async def ask(self, state, questions):
+            r = await super().ask(state, questions)
+            if "next" in r.choices:
+                r.choices["filler"] = {
+                    "choice": "thinking", "confidence": 0.4,
+                    "probabilities": {"none": 0.1, "thinking": 0.6, "casual": 0.3},
+                }
+            return r
+
+    fillers = FakeFillers()
+    engine = StateEngine()
+    events = []
+
+    async def pub(e):
+        events.append(e)
+
+    engine.add_publisher(pub)
+    ctrl = InteractionController(engine, FillerJev(), fillers=fillers)
+    down, _ = await run_test(
+        ctrl,
+        frames_to_send=[
+            VADUserStartedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            tr("Why do cats purr?"),
+            SleepFrame(0.3),
+        ],
+    )
+    kinds = [type(f).__name__ for f in down if isinstance(f, (SpeechOutputAudioRawFrame, *KEY))]
+    assert "SpeechOutputAudioRawFrame" in kinds
+    assert kinds.index("SpeechOutputAudioRawFrame") < kinds.index("ProposedUserStoppedSpeakingFrame")
+    assert fillers.picked == ["thinking"]
+    assert any(e["type"] == "interaction" and e["event"] == "filler" for e in events)
+
+
+async def test_no_filler_when_jev_says_none():
+    from pipecat.frames.frames import SpeechOutputAudioRawFrame
+
+    fillers = FakeFillers()
+    ctrl, engine, events = make()
+    ctrl._fillers = fillers  # FakeJev answers without a "filler" question at all
+    down, _ = await run_test(
+        ctrl,
+        frames_to_send=[
+            VADUserStartedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            tr("Turn off the lights."),
+            SleepFrame(0.3),
+        ],
+    )
+    assert not [f for f in down if isinstance(f, SpeechOutputAudioRawFrame)]
+    assert fillers.picked == []
