@@ -22,3 +22,4 @@ cp .env.example .env   # add GENERAL_COMPUTE_API_KEY and GRADIUM_API_KEY
 - [COORDINATION.md](COORDINATION.md) — mission, lanes, contracts, timeline, decisions
 - [CLAUDE.md](CLAUDE.md) — rules every coding agent follows
 - Tasks live in GitHub Issues
+Hi
