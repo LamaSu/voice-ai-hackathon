@@ -8,7 +8,6 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transcriptions.language import Language
 
 from app.config import Settings
-from app.reasoning_filter import ReasoningFilter
 
 BOT_NAME = "Jev"
 
@@ -29,13 +28,10 @@ def make_stt(s: Settings) -> GradiumSTTService:
 
 def make_tts(s: Settings) -> GradiumTTSService:
     settings = GradiumTTSService.Settings(voice=s.gradium_tts_voice) if s.gradium_tts_voice else None
-    return GradiumTTSService(
-        api_key=s.gradium_api_key,
-        settings=settings,
-        # gpt-oss-120b streams its chain of thought inline in <think> tags, and
-        # without this the agent reads its own reasoning out loud.
-        text_filters=[ReasoningFilter()],
-    )
+    # Reasoning is stripped upstream, in app/llm_general_compute.py: lane A hides
+    # the analysis channel at the stream and sets reasoning_effort="low", which
+    # is better than filtering text here — it never reaches the pipeline at all.
+    return GradiumTTSService(api_key=s.gradium_api_key, settings=settings)
 
 
 def make_llm(s: Settings) -> OpenAILLMService:
