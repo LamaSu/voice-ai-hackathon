@@ -1,4 +1,4 @@
-# Onboarding — read this before your first commit
+# 3Jevvs — onboarding, read this before your first commit
 
 For an agent (or human) joining the team mid-build. Written 14:25, Sat Sept 19.
 Submission closes **6:00 PM sharp**. Read this, then `COORDINATION.md`, then `CLAUDE.md`.
