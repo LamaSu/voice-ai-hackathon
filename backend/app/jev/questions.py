@@ -86,6 +86,22 @@ END_OF_TURN_QUESTIONS: dict[str, Any] = {
             "casual": "An informal reaction: 'Oof', 'Ooh', 'Welp', 'Ah', 'Look...'.",
         },
     ),
+    "task": Choice(
+        instructions=(
+            "Is the user asking for something the agent should go and DO in the background, "
+            "rather than just answer from conversation? Pick the kind of job, or 'none' when "
+            "the agent can simply reply."
+        ),
+        criteria={
+            "none": "Ordinary conversation: chat, an opinion, a fact the agent can just say, "
+            "or a follow-up about something already discussed.",
+            "timer": "Set a timer, alarm, or remind me in N minutes/seconds.",
+            "stock": "A share price or how a company's stock is doing.",
+            "sports": "A game score, result or fixture.",
+            "lookup": "Something that needs looking up and would take a moment: research, "
+            "a calculation, checking a source.",
+        },
+    ),
     "introducing_self": Noul(
         instructions="Is the user telling the agent their own name (introducing themselves)?"
     ),

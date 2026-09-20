@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pipecat.services.gradium.stt import GradiumSTTService
 from pipecat.services.gradium.tts import GradiumTTSService
-from pipecat.services.openai.llm import OpenAILLMService
+from app.llm_general_compute import GeneralComputeLLMService
 from pipecat.transcriptions.language import Language
 
 from app.config import Settings
@@ -34,9 +34,9 @@ def make_tts(s: Settings) -> GradiumTTSService:
     return GradiumTTSService(api_key=s.gradium_api_key, settings=settings)
 
 
-def make_llm(s: Settings) -> OpenAILLMService:
-    return OpenAILLMService(
+def make_llm(s: Settings) -> GeneralComputeLLMService:
+    return GeneralComputeLLMService(
         api_key=s.general_compute_api_key,
         base_url=s.general_compute_base_url,
-        settings=OpenAILLMService.Settings(model=s.llm_model, temperature=0.6, max_tokens=220),
+        settings=GeneralComputeLLMService.Settings(model=s.llm_model, temperature=0.6, max_tokens=400),
     )

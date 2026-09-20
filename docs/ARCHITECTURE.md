@@ -31,7 +31,7 @@ Every key is read from the repo-root `.env`:
 | --- | --- | --- |
 | ASR | Gradium `wss://api.gradium.ai/api/speech/asr` via `pipecat.services.gradium.stt.GradiumSTTService` | Needs a language (`en`), `delay_in_frames=7` (its minimum). Interim text streams continuously but runs ~0.9 s behind the speaker; the final transcript arrives after a VAD-stop flush. That lag is why barge-in needs a duration backstop (below). |
 | TTS | Gradium `wss://api.gradium.ai/api/speech/tts` via `GradiumTTSService` | 48 kHz PCM with word timestamps. First audio in about 0.4–1.0 s. |
-| LLM | General Compute `https://api.generalcompute.com/v1` via Pipecat `OpenAILLMService(base_url=...)` | Time to first token on a demo-shaped prompt (`scripts/latency_check.py`, 5 trials): **gpt-oss-120b 559 ms**, gemma-4-31B-it 1138 ms, minimax-m2.7 1457 ms. Default `gpt-oss-120b`, overridable with `LLM_MODEL`. These move with provider load: minimax measured fastest earlier in the day, so re-run the check before relying on it. |
+| LLM | **`app/llm_general_compute.py`** wraps Pipecat's OpenAI service: `reasoning_effort="low"` (the API rejects `"none"`) and the `analysis` channel is filtered out of the stream, because gpt-oss is a reasoning model and the provider occasionally flushes its chain-of-thought into `content`, which Pipecat then speaks. A `ReasoningFilter` processor between the LLM and TTS drops any response that still opens like private notes ("We need to respond…", "The user says…"). | General Compute `https://api.generalcompute.com/v1` via Pipecat `OpenAILLMService(base_url=...)` | Time to first token on a demo-shaped prompt (`scripts/latency_check.py`, 5 trials): **gpt-oss-120b 559 ms**, gemma-4-31B-it 1138 ms, minimax-m2.7 1457 ms. Default `gpt-oss-120b`, overridable with `LLM_MODEL`. These move with provider load: minimax measured fastest earlier in the day, so re-run the check before relying on it. |
 | Interaction decisions | Jev `POST https://api.typesafe.ai/v1/systemone`, model `jev-latest` (currently jev-1.13.0), via `typesafe-sdk` | p50 ≈ 145 ms for a 2–4 question fan-out (range 90–470 ms). Hard timeout of 600 ms, then deterministic fallback. |
 
 ## Pipeline (Pipecat 1.11)
@@ -147,11 +147,60 @@ the agent plays a short cached reaction — "Hmm.", "Got it.", "Give me a sec." 
 
   Set `ENABLE_FILLERS=0` to turn them off.
 
+## Gaze gating: speech nobody aimed at the agent
+
+With a camera running, the agent stays out of conversations that aren't with it.
+
+- **Rule** (`gaze_blocks_turn`): if faces are in frame and **none** of them are looking at the agent,
+  the turn is dropped instead of answered, and an overlap does not interrupt the bot.
+- **Not knowing is not a reason to ignore someone.** The gate is off whenever we can't tell: no
+  camera, no face in frame, or telemetry older than 2 s. A frozen "looking away" must never deafen
+  the agent.
+- **Hard-stop words still work.** "Stop" interrupts whether or not anyone is looking.
+- **The UI shows what was ignored**, greyed out with the reason, rather than hiding it — otherwise a
+  gated agent is indistinguishable from a broken one.
+
+Verified end to end in `scripts/e2e_gaze.py`, which sends the same `faces` telemetry the browser does:
+speech ignored while everyone looks away, the same question answered when someone looks, and room
+talk failing to interrupt the bot.
+
+## Background agents (telemetry widget)
+
+"Set a timer for ten seconds", "what's Apple trading at", "what was the score" — work the
+conversation shouldn't wait for. Jev decides, an agent runs off the conversation path, and the
+answer is spoken when it's ready.
+
+- **Deciding:** the `task` question in the end-of-turn fan-out — `none | timer | stock | sports |
+  lookup` — so it costs no extra round trip. Live: "Set a timer for ten seconds" → timer (1.0),
+  "What was the score in the Lakers game?" → sports (1.0), "Tell me a story" → none (1.0).
+  `choose_task` needs 0.55 confidence: spinning up a visible agent on a guess is worse than not.
+- **Receipt:** a task turn always plays a cached acknowledging clip immediately (0.38 s), and the
+  LLM is told to say only that it's on it, never to invent the answer.
+- **Running:** `app/tasks/runner.py` spawns the agent and publishes a `tasks` event on every state
+  change. Sources need no API keys: Yahoo Finance for quotes, ESPN (`site.web.api.espn.com`) for
+  scores, the General Compute LLM for lookups. A failed agent reports and never breaks the call.
+- **Answering:** the result is spoken with `TTSSpeakFrame` **only at a gap** — nobody speaking, no
+  turn open, no answer on its way (`_conversation_is_idle`). Until then it waits. It appends to the
+  LLM context, so the agent knows what it said.
+- **Widget:** the UI lists each agent with kind, title, status, a locally-ticking elapsed clock and
+  the result.
+
+Measured end to end (`scripts/e2e_agents.py`): receipt 0.38 s, the conversation answers an unrelated
+question while the timer runs, the timer fires at 10.0 s and is spoken, and a stock agent returns a
+real price in about 2 s.
+
 ## Speaker ID and memory
 
 - **Diarization:** SpeechBrain ECAPA (`speechbrain/spkrec-ecapa-voxceleb`, 192-dim, CPU) plus WhoSpeaksLive's `SpeakerMemory` online clustering. The module is copied verbatim to `backend/app/perception/whospeaks/`.
+  - **Capped at 3 voice profiles**: every extra profile is another centroid to score on every live
+    window, and a roomful of half-heard voices costs latency on the turn-taking path.
   - Live: `score_existing` every 0.4 s during speech.
   - Final: `classify` on each whole utterance, which creates and updates the S1, S2, ... profiles.
+- **Names from context:** the memory pass after each exchange also returns `speaker_name` — the name
+  of the person speaking, when the exchange makes it clear. That covers a self-introduction, the
+  agent addressing them ("Great, Simone — I'll book it"), or someone in the room using their name.
+  A third person merely mentioned ("I met Sarah yesterday") is not taken. An explicit "call me X"
+  overwrites an existing name; otherwise names are only filled in when unknown.
 - **People memory:** when Jev's `introducing_self` is at least 0.6, General Compute extracts the name as JSON and binds it to the active speaker profile. Profiles, names and facts are saved to `backend/data/memory.json`, so people are recognized in later sessions.
 - **Conversation memory:** after each exchange, General Compute updates a rolling summary plus facts per person in the background. That memory goes into the LLM system prompt.
 
@@ -169,6 +218,7 @@ The server sends events to the browser through RTVI server messages (`rtvi.send_
 | `metrics` | **Contract 4** | `{type: "metrics", payload: {...}}` from lane D's `LatencyHUD` |
 | `transcript` | final user or bot text | `role`, `text`, `speaker` |
 | `memory` | when memory changes | `people`: [{label, name, speech_seconds, facts}], `summary` |
+| `tasks` | background agents change | `tasks`: [{id, kind, title, status, started_at, elapsed_s, result, error}] |
 
 Client to server:
 - `client.sendClientMessage("user_state", <Contract 1>)` at about 10 Hz (lane C)

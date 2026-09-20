@@ -177,3 +177,20 @@ def test_sustained_overlap_interrupt(speech_s, energy, passive, expected):
     from app.turns.policy import sustained_overlap_interrupt
 
     assert sustained_overlap_interrupt(speech_s=speech_s, energy=energy, resolved_passive=passive) is expected
+
+
+@pytest.mark.parametrize(
+    "enabled,faces,looking,age,expected",
+    [
+        (True, 2, 0, 0.2, True),    # two people in frame, both looking away: room talk
+        (True, 1, 1, 0.2, False),   # looking at the agent
+        (True, 0, 0, 0.2, False),   # camera on, nobody in frame: can't tell, so listen
+        (True, 2, 0, 5.0, False),   # stale telemetry must not deafen the agent
+        (True, 2, 0, None, False),  # never received any gaze data
+        (False, 2, 0, 0.2, False),  # gate disabled
+    ],
+)
+def test_gaze_blocks_turn(enabled, faces, looking, age, expected):
+    from app.turns.policy import gaze_blocks_turn
+
+    assert gaze_blocks_turn(enabled=enabled, face_count=faces, looking_count=looking, age_s=age) is expected

@@ -37,16 +37,18 @@ from app.contracts import UserState
 from app.jev.client import JevClient, JevResult, NullJev
 from app.observers.latency_hud import LatencyHUD
 from app.fillers import FillerLibrary
+from app.tasks.runner import TaskRunner
 from app.memory.store import MemoryLLM, MemoryStore, regex_name
 from app.perception.bot_tap import BotTap
 from app.perception.speaker_id import SpeakerIdProcessor, new_speaker_memory
 from app.perception.vision import apply_faces, apply_gaze, apply_user_state
+from app.llm_general_compute import ReasoningFilter
 from app.services import SYSTEM_PROMPT, make_llm, make_stt, make_tts
 from app.state.engine import StateEngine
 from app.telemetry import SessionTelemetry
 from app.state.interaction_state import ConversationState, SpeakerState
 from app.turns.controller import InteractionController
-from app.turns.policy import is_introduction
+from app.turns.policy import choose_task, is_introduction
 
 
 class SharedResources:
@@ -130,24 +132,43 @@ def build_session(
         ),
     )
 
+    async def publish_tasks(tasks: list[dict[str, Any]]) -> None:
+        await engine.publish("tasks", tasks=tasks)
+
+    runner = TaskRunner(publish_tasks, lambda text: controller.announce(text), llm=shared.memory_llm)
+
     async def publish_memory() -> None:
         await engine.publish("memory", **memory.to_ui())
 
-    def refresh_system_prompt(speaker_label: str | None) -> None:
+    def refresh_system_prompt(speaker_label: str | None, note: str | None = None) -> None:
         block = memory.prompt_block()
-        who = memory.display_name(speaker_label)
+        # only a real name: "S2" is an internal label and the LLM will happily say it out loud
+        person = memory.people.get(speaker_label) if speaker_label else None
+        who = person.name if person and person.name else None
         parts = [SYSTEM_PROMPT]
         if block:
             parts.append(block)
         if who:
             parts.append(f"The person speaking right now is {who}.")
+        if note:
+            parts.append(note)
         msgs = context.get_messages()
         msgs[0] = {"role": "system", "content": "\n\n".join(parts)}
         context.set_messages(msgs)
 
-    async def before_respond(text: str, speaker_label: str | None) -> str:
+    async def before_respond(text: str, speaker_label: str | None, r: JevResult | None = None) -> str:
         # Who is speaking goes into the system prompt, not the transcript text (keeps the UI clean).
-        refresh_system_prompt(speaker_label)
+        kind = choose_task(r)
+        note = None
+        if kind:
+            rec = await runner.start(kind, text)
+            if rec:
+                note = (
+                    f"You just started a background job ({rec.title}). Say only that you're on it, "
+                    "in one short sentence. Do NOT invent the answer — it will be delivered when the "
+                    "job finishes."
+                )
+        refresh_system_prompt(speaker_label, note)
         return text
 
     async def on_turn_accepted(text: str, speaker_label: str | None, r: JevResult | None) -> None:
@@ -198,6 +219,11 @@ def build_session(
         fillers=shared.fillers,
     )
     llm = make_llm(s)
+
+    async def on_reasoning_suppressed(text: str) -> None:
+        await engine.publish("interaction", event="reasoning_suppressed", text=text[:120])
+
+    reasoning_filter = ReasoningFilter(on_suppressed=on_reasoning_suppressed)
     tts = make_tts(s)
     bot_tap = BotTap(engine, on_response_done=controller.on_response_done)
 
@@ -210,6 +236,7 @@ def build_session(
             controller,
             user_agg,
             llm,
+            reasoning_filter,
             tts,
             transport.output(),
             bot_tap,
@@ -222,9 +249,10 @@ def build_session(
         params=PipelineParams(audio_in_sample_rate=16000, enable_metrics=True),
         idle_timeout_secs=None,
         observers=[latency_observer],
-        # The UI should only see user text the controller accepted as a turn, not raw Gradium
-        # interims/finals (backchannels, echo) — so the STT is an ignored RTVI source.
-        rtvi_observer_params=RTVIObserverParams(ignored_sources=[stt]),
+        # The observer reports every push, so a processor that re-emits text would be
+        # reported twice. The controller is the only source of user text (not raw Gradium
+        # interims/finals), and the reasoning filter is the only source of bot text.
+        rtvi_observer_params=RTVIObserverParams(ignored_sources=[stt, llm]),
     )
 
     async def send_to_client(event: dict[str, Any]) -> None:
@@ -249,6 +277,7 @@ def build_session(
     @worker.rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):
         await publish_memory()
+        await publish_tasks(runner.snapshot())
         await engine.publish_snapshot(force=True)
 
     @worker.rtvi.event_handler("on_client_message")
@@ -284,7 +313,12 @@ def build_session(
 
         async def update_memory():
             if await shared.memory_llm.update(memory, label, user_text, text):
+                if label and engine.state.speaker.label == label:
+                    learned = memory.people.get(label)
+                    if learned and learned.name:
+                        engine.state.speaker.name = learned.name
                 await publish_memory()
+                await engine.publish_snapshot(force=True)
 
         asyncio.create_task(update_memory())
 
@@ -308,6 +342,7 @@ def build_session(
     @worker.event_handler("on_pipeline_finished")
     async def on_finished(worker, frame):
         shared.sessions.discard(reset_session)
+        await runner.cancel_all()
         log_fh.close()
         await jev.aclose()
 

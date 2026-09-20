@@ -280,6 +280,13 @@ async def main() -> int:
     await say("second_person")
     await wait_bot_done()
     await asyncio.sleep(2.0)
+    # the name can arrive from the memory pass after the exchange, so give it a moment
+    await wait_until(
+        lambda: any(
+            p.get("name") and p["label"] != "S1" for e in evs("memory") for p in e.get("people", [])
+        ),
+        12,
+    )
     labels = {e["state"]["speaker"]["label"] for e in evs("state") if e["state"]["speaker"]["label"]}
     results["speaker_labels_seen"] = sorted(labels)
     mem = evs("memory")
@@ -295,6 +302,13 @@ async def main() -> int:
     # ---- summary -----------------------------------------------------------------
     fillers = [e for e in events if e.get("type") == "interaction" and e.get("event") == "filler"]
     results["fillers_played"] = [(f["category"], f["text"], f["duration_s"]) for f in fillers]
+    # the RTVI observer reports every push, so a processor that re-emits text can double
+    # every line in the transcript: guard against that regression
+    bot_lines = [e.get("text", "") for e in evs("transcript") if e.get("role") == "bot"]
+    dupes = [a for a, b in zip(bot_lines, bot_lines[1:]) if a and a == b]
+    results["duplicate_bot_lines"] = dupes
+    if dupes:
+        failures.append(f"bot transcript repeated: {dupes[0][:40]!r}")
     jev = evs("jev")
     lat = sorted(e["answers"]["latency_ms"] for e in jev if e.get("answers") and e["answers"].get("ok"))
     results["jev_calls"] = len(jev)

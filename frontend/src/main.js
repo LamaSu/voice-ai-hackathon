@@ -178,6 +178,8 @@ function log(who, text, kind = who) {
 
 // Exposed so the D2 test harness can drive the HUD without a live bot.
 window.__hud = hud;
+// Exposed so tests can send telemetry (e.g. `faces`) the way the camera would.
+window.__client = client;
 
 // `?replay=1` renders a recorded trace so the HUD can be checked with no bot
 // running and no Gradium credits spent.

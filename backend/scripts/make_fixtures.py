@@ -29,6 +29,10 @@ CLIPS = {
     "second_person": (SECOND_VOICE, "Hello, I'm Marcus. What's the capital of Japan?"),
     # reliably makes Jev pick a filler (a question worth weighing), for latency A/B
     "why_purr": (USER_VOICE, "Why do cats purr, actually? Is it always contentment?"),
+    # background-agent scenarios
+    "set_timer": (USER_VOICE, "Set a timer for ten seconds."),
+    "capital": (USER_VOICE, "What's the capital of Japan?"),
+    "stock_price": (USER_VOICE, "What's Apple trading at today?"),
 }
 
 

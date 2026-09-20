@@ -90,3 +90,26 @@ button.ghost:hover { color: var(--text); }
 button.danger { background: transparent; border: 1px solid var(--poor); color: var(--poor); border-radius: 6px; padding: 7px 12px; font-size: 13px; cursor: pointer; }
 button.danger:hover { background: var(--poor); color: #fff; }
 button.danger:disabled { opacity: 0.5; cursor: default; }
+
+/* background agents (telemetry) */
+.jev-grid .jev-agents { grid-column: 1 / -1; }
+.agents-count { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; }
+.agents-count.on { color: var(--good); border-color: var(--good); }
+.agents { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; }
+.agents > li.empty { border: 1px dashed var(--line); border-radius: 8px; padding: 10px; color: var(--muted); font-size: 13px; grid-column: 1 / -1; }
+.agent { border: 1px solid var(--line); border-left-width: 3px; border-radius: 8px; padding: 9px 10px; }
+.agent-running { border-left-color: var(--fair); }
+.agent-done { border-left-color: var(--good); }
+.agent-failed { border-left-color: var(--poor); }
+.agent-top { display: flex; align-items: baseline; gap: 8px; }
+.agent-kind { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+.agent-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-time { margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.agent-running .agent-time { color: var(--fair); }
+.agent-result { font-size: 12px; margin-top: 5px; line-height: 1.45; }
+.agent-result.muted { color: var(--muted); }
+
+/* speech the agent deliberately ignored (nobody looking at it) */
+.log-ignored { opacity: 0.55; }
+.log-ignored .ignored-text { color: var(--muted); font-style: italic; }
+.log-ignored .ignored-why { color: var(--muted); font-size: 11px; }
