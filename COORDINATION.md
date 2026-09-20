@@ -13,97 +13,79 @@ We ship a live voice agent that notices a user getting confused mid-explanation,
 
 **Submission:** register on hackathon.new, link this repo (no repo, not judged), add a demo video or live demo plan. One submission per team; teams are 2–4 people. Deadline **6:00 PM sharp**. The repo must be public by then.
 
-## 🔴 MERGE EVERYTHING — 17:37, and the repo is already public
+## ✅ Everything is merged — 18:15, and `preflight --live` says GO
 
-**Every improvement made today is stranded on a branch. `main` is what judges see, and it has
-none of it.** This is now the only thing that matters.
+Every branch that was stranded at 17:37 is now on `main`: **#24** (lane D, repair loop + telemetry),
+**#25** (lane A, reasoning fix + gaze gating + transcript), **#22** (lane C, prosody into
+`confusion_p`) and **#26** (preflight fixes). Merged after verifying all three combine: **0 conflicts
+in any order**, and the combined tree passing **155 backend + 42 frontend tests** plus all three live
+suites (`e2e_webrtc`, `e2e_gaze`, `e2e_agents`) against real providers.
 
-I dry-ran all three against `main`, individually and stacked. **All clean, zero conflicts** —
-@Manjotpahwa's earlier conflict cleared when they merged `main` in. The fully-merged tree passes
-**155 backend + 42 frontend tests, build clean.**
+The three post-merge steps are done on the machine with the keys: probe clips rendered (52 clips
+total), and **`./scripts/preflight.sh --live` → GO, 14 passed, 2 warnings, 0 failures.**
 
-```bash
-gh pr merge 25 --merge --repo LamaSu/voice-ai-hackathon   # lane A: reasoning fix, gaze gating, transcript
-gh pr merge 24 --merge --repo LamaSu/voice-ai-hackathon   # lane D: repair loop, probes, telemetry
-gh pr merge 22 --merge --repo LamaSu/voice-ai-hackathon   # lane C: prosody into confusion_p
-```
+## Status board — 18:15, Sat Sept 19
 
-Order does not matter. Merging fewer than all three leaves working, tested features undemoable.
+Updated by the lane A agent (claude-jev). Replace this block wholesale at each standup.
 
-### What each one is worth, and what is lost without it
-
-| PR | Without it, on stage |
-| --- | --- |
-| **#25** lane A | The agent **reads its own chain of thought aloud**. Also loses gaze-gated turn-taking and the double-transcript fix. |
-| **#24** lane D | The agent **never notices confusion and never repairs** — the behaviour this project is named for. The repair loop was built in #19 and never wired; `probes.py` was dead code until this PR. |
-| **#22** lane C | `confusion_p` stays face-only. Prosody (pause, rate, pitch) never reaches the trigger, so the demo's hesitation cue is weaker than it should be. |
-
-### After merging, in order
-
-1. `cd backend && uv run ruff check --fix .` — merging #24 and #25 leaves one duplicate
-   `TTSSpeakFrame` import; we both added it. Lint only, but it is 5 seconds.
-2. `uv run python scripts/make_fillers.py` — **@akashatnitr only**; needs the Gradium key. Renders
-   the 3 probe clips, removing ~0.4–1 s of silence from the repair moment. Safe to skip: the
-   fallback synthesises.
-3. `./scripts/preflight.sh --live` — go/no-go before any run.
-
-### Still unanswered, and no agent can close it
-
-**#15 — is the model we are actually running served on SN40/SN50?** We have shipped on three
-different models today and confirmed nothing. This is the eligibility gate.
-
-## Status board — 16:55, Sat Sept 19
-
-Updated by the lane D agent. Replace this block wholesale at each standup.
-
-**One-line state:** `main` finally carries the whole demo path and is green. Latency is fixed
-(1830 ms → ~500 ms). Two live bugs remain, one fixed and unmerged. **Eligibility (#15) is still
-unverified and is now the biggest risk to the prize.**
+**One-line state:** `main` carries the whole demo path, the go/no-go passes, and nothing is stranded
+on a branch. **Eligibility (#15) is still unverified and is the biggest remaining risk to the prize;
+no agent can close it.** The dress rehearsal and backup recording are the next gate.
 
 | Checkpoint | Due | State |
 | --- | --- | --- |
 | Feature freeze | 4:30 PM | passed; only fixes since |
-| Dress rehearsal + backup recording | 5:15 PM | ⬜ **next** — `docs/DEMO_RUNBOOK.md`, gate on `./scripts/preflight.sh --live` |
-| Repo public, README, submitted | 5:45 PM | ⬜ **ask rg before making the repo public** |
+| Dress rehearsal + backup recording | 5:15 PM | ⬜ **next** — `docs/DEMO_RUNBOOK.md`, gated on `./scripts/preflight.sh --live` (currently GO) |
+| Repo public, README, submitted | 5:45 PM | repo is public; submission still to confirm |
 
-### Merged into `main` (9a84b57), verified green: 105 backend, 25 frontend
+### On `main` (665aff4), verified with the live keys
 
-- **Latency 1830 ms → ~500 ms median** (best 361 ms): spoken fillers, Jev hold timeout 2.0→1.1 s,
-  end-of-turn budget 0.6→1.2 s, `gpt-oss-120b` for `minimax-m2.7`, shorter prompt.
-- Multi-face gaze (up to 4), named transcript, `sustained_overlap_interrupt` for cloud-ASR barge-in.
-- Contract 4 reports **both** first-audio and first-*content*, so a filler cannot quietly turn our
-  headline number into "time to Hmm".
-- Session telemetry + `scripts/diagnose.py`, `scripts/where_time_goes.py`, `scripts/preflight.sh`,
-  `docs/DEMO_RUNBOOK.md`.
+- **The repair loop is wired.** It shipped in #19 with green unit tests and **nothing ever called
+  it** — `probes.py` had no importer outside its own tests, so the agent had never noticed confusion
+  in any run all day. Caught by lane D, fixed in #24. A reminder that a unit test on a pure function
+  cannot tell you whether anything calls it.
+- **The agent no longer reads its chain of thought aloud.** Suppressed at the completion stream
+  (`reasoning_effort="low"` plus dropping the non-final `analysis` channel), so reasoning never
+  enters the pipeline, with a filter before TTS as a second line of defence.
+- Gaze-gated turn-taking, background agents with a telemetry widget, prosody in `confusion_p`,
+  names learned from context, transcript credited by speaker name, and the double-transcript fix.
 
-### Open bug, fix ready and unmerged
+### Numbers to quote, measured on `main` after the merge
 
-**The agent speaks its own reasoning.** `gpt-oss-120b` streams chain of thought inline in `<think>`
-tags — Pipecat's Groq service documents exactly this for the GPT-OSS family — and nothing stripped
-it, so it reached TTS. `ReasoningFilter` on the TTS service removes it. It is stateful on purpose:
-streaming splits `<think>` across chunks and a per-chunk regex leaks the very text it removes.
-Deliberately **not** done: passing `reasoning_effort` to the API. It cannot be tested from here and
-an unsupported parameter would 400 every request and take the demo down.
+| What | Figure |
+| --- | --- |
+| First sound after a question | **0.30–0.40 s** (a cached filler, when Jev picks one) |
+| Answer audio | **1.28–1.31 s** — the honest number; a filler cannot disguise it |
+| `gpt-oss-120b` TTFT, 9 trials | **502 ms** median (493–529), tight spread |
+| gemma-4-31B-it / minimax-m2.7 TTFT | 1113 ms / 1681 ms (minimax worst 3215 ms) |
+| Tests | 155 backend, 42 frontend |
+
+Two cautions when quoting these:
+
+- **`latency_check.py`'s default model list does not include `gpt-oss-120b`,** the model we ship.
+  Pass `--models gpt-oss-120b,...` or you will report on models we are not running.
+- **The preflight latency line pools the whole day** — 800 ms over 226 turns, including four stalled
+  turns (63 s, 182 s, 114 s, 12 s) that are not the speech path. Archive `metrics.jsonl` before the
+  rehearsal so the median describes tonight's build.
 
 ### Known limits — describe these accurately rather than be caught out
 
 - **The answer floor is ~0.9 s** (TTFT + TTS + endpointing). Below that the honest answer is a
   cached filler, not a faster model. Quote **both** HUD numbers.
-- **TTFT moves with provider load.** Our two measurements disagree about which model is faster
-  (#16 had minimax ahead, #21 has gpt-oss ahead). Re-run `scripts/latency_check.py --trials 9`
-  close to judging rather than quoting an hour-old figure.
-- **Confusion reaches Jev but no Jev question asks about it.** `confusion_p` is in the state block;
-  the repair trigger is deterministic (`decide_probe`/`ConfusionTracker`). Accurate answer: the
-  model reasons about *whether you are addressing it* from gaze; the confusion trigger is code.
-- Second speakers need 1.5–2.5 s of speech before getting their own voice profile.
+- **TTFT moves with provider load.** Readings taken hours apart disagreed about which model is
+  fastest. Re-run `scripts/latency_check.py --models gpt-oss-120b --trials 9` close to judging.
+- **Barge-in is bounded by cloud ASR.** Gradium's first word arrives ~0.9 s late, so a barge-in that
+  waits for text feels sluggish; `sustained_overlap_interrupt` stops the bot on 0.8 s of continuous
+  overlapping speech instead. Hard-stop words ("stop", "wait") never wait for anything.
+- **Gaze gating needs a camera.** With no camera, no face in frame, or telemetry older than 2 s, the
+  gate is off by design — not knowing is not a reason to ignore someone.
 
 ### Still needing a human, not an agent
 
-1. **#15 — is any General Compute model served on SN40/SN50?** We have now shipped on three
-   different models and confirmed nothing. This is the eligibility gate: fast and ineligible scores
-   zero, slow and eligible still places. **Highest-value hour of human time left.**
-2. **Gradium credits.** 145,000, Free plan, overages off — service stops dead when they run out, and
-   the rehearsal will spend some. Nobody has checked the balance since kickoff.
+- **#15 — is `gpt-oss-120b` served on SN40/SN50?** Confirmed again at 18:05 that nothing in the API
+  metadata names the hardware. Someone has to ask General Compute in writing. This is the
+  eligibility gate and we have shipped on three models today.
+- **Backup recording** (D3) — preflight still warns that none exists.
 
 ## Getting started
 
@@ -202,6 +184,10 @@ Newest first. Any change to a contract, lane scope, or the demo script goes here
 
 | When | Decision | Why | By |
 | --- | --- | --- | --- |
+| Sept 19, 18:15 | **Merged #24, #25, #22 and #26 into `main`.** rg authorised the merge, overriding rule 5's lane-owner reservation. Verified before merging: 0 conflicts in any order, 155 backend + 42 frontend tests, and all three live e2e suites against real providers. | Every improvement made today was stranded on branches while the repo was public, and `main` is what judges see. | rg (authorised), claude-jev (executed) |
+| Sept 19, 17:50 | **Reasoning is suppressed at the completion stream, not at TTS.** `reasoning_effort="low"` (the API rejects `"none"`) plus dropping non-final channels, with a text filter before TTS as a second line. Lane D's independent TTS-side fix was withdrawn. | Stripping at the stream means reasoning never travels the pipeline. `reasoning_effort` could only be settled by testing against the live endpoint — deferring it rather than guessing was right, since an unsupported parameter would 400 every request. | claude-lead-d (deferred), claude-jev (tested and shipped) |
+| Sept 19, 17:45 | **Pre-rendered fillers shipped** (the 16:05 proposal, which was deferred). 49 clips in the bot's own voice, Jev picks the category inside the existing end-of-turn fan-out, pushed as output audio before the frame that triggers the LLM. | It cost no extra Jev round trip and took first sound from 1.16 s to ~0.3 s. Per the 16:05 caveat: **the first sound is a filler, and Contract 4 now reports time-to-answer alongside it so the headline number cannot quietly become "time to Hmm".** | rg (proposed), claude-jev (built) |
+| Sept 19, 18:10 | `preflight.sh` fixed for macOS (`timeout` is GNU-only) and to accept `GENERAL_COMPUTE` as well as `GENERAL_COMPUTE_API_KEY` | Both failures were in the check rather than the system: a valid, working build was reported NO-GO on the demo machine. | claude-jev (#26) |
 | Sept 19, 16:05 | **Proposed, not built: pre-rendered filler audio to mask latency.** rg's idea — the agent says "Hmm, let me think" the instant a turn is accepted, while the real answer streams behind it. **The catch that decides whether it works:** a filler routed through normal TTS buys nothing, because Gradium synthesis is our top cost — it would arrive as late as the real answer. It only works pre-rendered to WAV at startup and pushed as `OutputAudioRawFrame`, bypassing TTS; `TTSSpeakFrame` re-enters TTS and does not help. Optional second Jev call picks a category (acknowledging / weighing / reframing / hedging) at ~145 ms p50; reframing fillers are strongest for us because they double as the repair behaviour. | It masks rather than reduces latency, which is legitimate and standard for voice agents — but if we ship it we must tell judges the first audio is a filler, or the metric means something other than it appears to. Needs a threshold so a fast reply isn't slowed, and a wrong-toned filler reads worse than silence. Est. 45 min including testing, i.e. past the 4:30 freeze and on the demo path. | rg (proposed); build deferred |
 | Sept 19, 15:35 | C3: derive prosody (pitch/rate/pause) on-device from the mic track already open, not Hume | No new vendor, no new key, no extra network call on the speech path — which matters with median end-of-speech-to-first-audio already over the 1.5s budget. Accuracy is lower than a dedicated emotion-from-voice API, but it's a prior confirmed by probe questions either way (see the confusion_p entry below), so the lower bar is acceptable. | claude-sense (lane C, #10) |
 | Sept 19, 14:20 | Build on the Jev-driven interaction engine (`voice/1-jev-interaction-engine`), not the stock Pipecat quickstart | Most Technical Implementation counts depth double. A custom interruption-first controller with a deterministic policy layer, typed fan-out decisions and graceful Jev-unavailable fallbacks is a far stronger submission than the quickstart, and it already exists with 27 green unit tests. Rebuilding a simpler path would cost hours we do not have before the 4:30 freeze. | rg (delegated to lane D agent) |
