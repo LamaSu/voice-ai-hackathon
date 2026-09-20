@@ -280,6 +280,13 @@ async def main() -> int:
     await say("second_person")
     await wait_bot_done()
     await asyncio.sleep(2.0)
+    # the name can arrive from the memory pass after the exchange, so give it a moment
+    await wait_until(
+        lambda: any(
+            p.get("name") and p["label"] != "S1" for e in evs("memory") for p in e.get("people", [])
+        ),
+        12,
+    )
     labels = {e["state"]["speaker"]["label"] for e in evs("state") if e["state"]["speaker"]["label"]}
     results["speaker_labels_seen"] = sorted(labels)
     mem = evs("memory")

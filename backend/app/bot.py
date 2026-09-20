@@ -39,6 +39,7 @@ from app.memory.store import MemoryLLM, MemoryStore, regex_name
 from app.perception.bot_tap import BotTap
 from app.perception.speaker_id import SpeakerIdProcessor, new_speaker_memory
 from app.perception.vision import apply_faces, apply_gaze, apply_user_state
+from app.llm_general_compute import ReasoningFilter
 from app.services import SYSTEM_PROMPT, make_llm, make_stt, make_tts
 from app.state.engine import StateEngine
 from app.state.interaction_state import ConversationState, SpeakerState
@@ -214,6 +215,11 @@ def build_session(
         fillers=shared.fillers,
     )
     llm = make_llm(s)
+
+    async def on_reasoning_suppressed(text: str) -> None:
+        await engine.publish("interaction", event="reasoning_suppressed", text=text[:120])
+
+    reasoning_filter = ReasoningFilter(on_suppressed=on_reasoning_suppressed)
     tts = make_tts(s)
     bot_tap = BotTap(engine, on_response_done=controller.on_response_done)
 
@@ -226,6 +232,7 @@ def build_session(
             controller,
             user_agg,
             llm,
+            reasoning_filter,
             tts,
             transport.output(),
             bot_tap,
