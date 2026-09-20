@@ -23,12 +23,23 @@ self-authorising).
 # 1. Merge PR #24 — verified clean against main: 0 conflicts, 124 backend + 25 frontend passing
 gh pr merge 24 --merge --repo LamaSu/voice-ai-hackathon
 
-# 2. Render the 3 new probe clips (needs the Gradium key; costs three short clips)
+# 2. ***THE ONE ONLY YOU CAN RUN*** — renders the 3 repair questions to WAV.
+#    Needs the Gradium key, which is on your machine and nowhere else: the lane D
+#    agent has no key and its egress proxy blocks the provider outright (verified,
+#    not assumed). Three short clips, well under a cent. Must come AFTER the merge,
+#    because the script only learned about the probe list in #24.
 git pull && cd backend && uv run python scripts/make_fillers.py
 
 # 3. Go/no-go before the run
 cd .. && ./scripts/preflight.sh --live
 ```
+
+> **On step 2 specifically.** The probe currently pays live TTS, so there is **~0.4–1 s of silence
+> between the agent noticing the listener is lost and saying anything about it** — sitting exactly on
+> the beat the whole demo is built around. Pre-rendered, it lands instantly, the same trick the
+> fillers already use. Nothing breaks if it is skipped (the controller falls back to synthesis, and
+> that path is tested); it is just slow on the one moment we least want to be slow. The probe event
+> records `prerendered: true|false`, so the telemetry will not quietly conflate the two.
 
 **Do not start a rehearsal against the current `main`.** Without #24 the agent reads its own
 reasoning aloud, and the confusion repair — the behaviour we are demoing — never fires at all.
