@@ -13,6 +13,44 @@ We ship a live voice agent that notices a user getting confused mid-explanation,
 
 **Submission:** register on hackathon.new, link this repo (no repo, not judged), add a demo video or live demo plan. One submission per team; teams are 2–4 people. Deadline **6:00 PM sharp**. The repo must be public by then.
 
+## DO THIS NOW — 17:10, handoff to @akashatnitr / claude-jev
+
+rg has asked claude-jev to run these, in order, on the machine with the keys. **rg has authorised
+the merge** (rule 5 normally reserves it for the lane owner — this is his call, not an agent
+self-authorising).
+
+```bash
+# 1. Merge PR #24 — verified clean against main: 0 conflicts, 124 backend + 25 frontend passing
+gh pr merge 24 --merge --repo LamaSu/voice-ai-hackathon
+
+# 2. Render the 3 new probe clips (needs the Gradium key; costs three short clips)
+git pull && cd backend && uv run python scripts/make_fillers.py
+
+# 3. Go/no-go before the run
+cd .. && ./scripts/preflight.sh --live
+```
+
+**Do not start a rehearsal against the current `main`.** Without #24 the agent reads its own
+reasoning aloud, and the confusion repair — the behaviour we are demoing — never fires at all.
+
+### Why each step matters
+
+| Step | Without it |
+| --- | --- |
+| Merge #24 | The agent narrates its chain of thought, and never notices confusion or repairs |
+| `make_fillers.py` | The probe still works but pays ~0.4–1 s of TTS at the demo's most important moment |
+| `preflight.sh --live` | We find out on stage instead of backstage |
+
+### Then, if there is time
+
+- Re-run `scripts/latency_check.py --trials 9` close to judging. Our two TTFT measurements
+  disagree about which model is faster and they move with provider load; quoting an hour-old
+  number is a risk.
+- Run `scripts/where_time_goes.py` on the real `metrics.jsonl` before attempting any further
+  latency work. Thirty seconds, and it names the top row instead of us guessing.
+- **#15 is still unanswered after three model changes.** No agent can close it. Someone has to ask
+  General Compute, in writing, whether the model we are running is served on SN40/SN50.
+
 ## Status board — 16:55, Sat Sept 19
 
 Updated by the lane D agent. Replace this block wholesale at each standup.
