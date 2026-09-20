@@ -1,4 +1,6 @@
-# Confusion-aware voice agent
+# 3Jevvs
+
+**A confusion-aware voice agent.**
 
 A live voice agent that notices when a listener gets lost mid-explanation, stops, asks a non-leading question, and re-explains — with frontier-speed reasoning on SambaNova hardware.
 

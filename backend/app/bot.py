@@ -30,7 +30,10 @@ from pipecat.transports.base_transport import BaseTransport
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
+from pydantic import ValidationError
+
 from app.config import BACKEND_DIR, Settings, get_settings
+from app.contracts import UserState
 from app.jev.client import JevClient, JevResult, NullJev
 from app.observers.latency_hud import LatencyHUD
 from app.fillers import FillerLibrary
@@ -252,6 +255,13 @@ def build_session(
     async def on_client_message(rtvi, msg):
         if msg.type == "user_state" and isinstance(msg.data, dict):
             apply_user_state(engine, msg.data)  # Contract 1 (lane C)
+            # ...and give it to the repair loop (B2/B3). Without this the
+            # confusion trigger never runs and the demo's core moment — notice,
+            # stop, probe, re-explain — simply never happens.
+            try:
+                await controller.observe_user_state(UserState(**msg.data))
+            except ValidationError as e:
+                logger.warning(f"malformed user_state from client: {e}")
         elif msg.type == "client_log" and isinstance(msg.data, dict):
             # Browser-side trouble (autoplay blocked, MediaPipe down, WebRTC) is
             # invisible server-side and dies with the console. Land it on disk.

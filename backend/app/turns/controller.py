@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     InterruptionFrame,
+    TTSSpeakFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
@@ -42,8 +43,11 @@ from app.jev.client import JevLike, JevResult
 from app.jev.questions import END_OF_TURN_QUESTIONS, OVERLAP_QUESTIONS, to_jev_state
 from app.state.engine import StateEngine
 from app.state.interaction_state import Phase
+from app.contracts import UserState
+from app.turns.probes import ProbeCooldown, decide_and_pick_probe
 from app.turns.policy import (
     Action,
+    ConfusionTracker,
     Decision,
     PolicyConfig,
     choose_filler,
@@ -121,6 +125,14 @@ class InteractionController(FrameProcessor):
         self._before_respond = before_respond
         self._on_turn_accepted = on_turn_accepted
         self._fillers = fillers
+
+        # B2/B3: the repair loop. confusion_p is a noisy prior, so the tracker
+        # counts *sustained* samples and the cooldown caps probes at one per
+        # three turns. Both were built and tested but never called — this is
+        # the wiring.
+        self._confusion = ConfusionTracker(cfg)
+        self._probe_cooldown = ProbeCooldown()
+        self._probing = False
 
         self._held: list[TranscriptionFrame] = []
         self._turn_open = False  # ProposedUserStartedSpeakingFrame sent, stop not yet sent
@@ -519,6 +531,59 @@ class InteractionController(FrameProcessor):
             self._engine.set_phase(Phase.IDLE)
         await self._engine.publish_snapshot(force=True)
 
+    # ------------------------------------------------------------------ repair
+    async def observe_user_state(self, sample: UserState) -> None:
+        """Contract 1, ~10 Hz. The demo moment: notice the listener is lost
+        mid-explanation, stop, and ask a non-leading question.
+
+        Called for every sample, so it must stay cheap and must not fire while
+        the bot is silent — probing someone who is not being explained to is
+        just interrupting them.
+        """
+        consecutive = self._confusion.observe(sample.confusion_p)
+        decision, candidate = decide_and_pick_probe(
+            sample,
+            consecutive_high=consecutive,
+            bot_speaking=self._bot_busy(),
+            already_probing=self._probing,
+            turn_count=self.s.conversation.turn_count,
+            cooldown=self._probe_cooldown,
+            cfg=self._cfg,
+        )
+        if decision.action is not Action.PROBE or candidate is None:
+            return
+
+        self._probing = True
+        self._confusion.reset()
+        logger.info(f"PROBE ({decision.reason}): {candidate.question!r}")
+        # Stop the explanation exactly as a barge-in would: same flush of LLM,
+        # TTS and queued audio, so we never talk over ourselves.
+        await self._interrupt("confusion_probe", candidate.question)
+        # Then ask. The question is chosen from a fixed set, not generated, so
+        # it can be pre-rendered like the fillers and play immediately. That
+        # matters here more than anywhere: this is the demo's moment, and
+        # paying TTS for it would put ~0.4-1s of silence between noticing the
+        # listener is lost and saying so. Falls back to synthesis when the clip
+        # is missing, so a machine without rendered probes still works.
+        clip = self._fillers.probe(candidate.question) if self._fillers else None
+        if clip is not None:
+            await self.push_frame(
+                SpeechOutputAudioRawFrame(
+                    audio=clip.pcm, sample_rate=clip.sample_rate, num_channels=1
+                )
+            )
+        else:
+            await self.push_frame(TTSSpeakFrame(candidate.question))
+        await self._engine.publish(
+            "interaction",
+            event="probe",
+            reason=decision.reason,
+            question=candidate.question,
+            hypotheses=sorted(candidate.hypotheses_covered),
+            confusion_p=round(sample.confusion_p, 3),
+            prerendered=clip is not None,
+        )
+
     # ------------------------------------------------------------------ actions
     async def _interrupt(self, reason: str, text: str) -> None:
         """Stop the bot: InterruptionFrame downstream cancels LLM, TTS and queued output audio."""
@@ -630,6 +695,7 @@ class InteractionController(FrameProcessor):
         else:
             text_for_llm = text
         self._answered_utt = self._utt
+        self._probing = False  # their reply to the probe is the answer we wanted
         held, self._held = self._held, []
         for name in ("_early_task", "_eot_task", "_hold_task"):
             if asyncio.current_task() is not getattr(self, name):

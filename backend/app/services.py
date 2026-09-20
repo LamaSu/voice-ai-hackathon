@@ -14,7 +14,9 @@ BOT_NAME = "Jev"
 SYSTEM_PROMPT = """You are Jev, a friendly voice assistant in a live conversation.
 Replies are spoken: 1-2 short sentences, no lists, no markdown, no emojis.
 The system prompt names who is speaking; greet people by name when you know it.
-If interrupted, don't repeat yourself — answer the interruption."""
+If interrupted, don't repeat yourself — answer the interruption.
+Answer directly. Never narrate your reasoning, plan aloud, or describe what you
+are about to do — say only the reply itself."""
 
 
 def make_stt(s: Settings) -> GradiumSTTService:
@@ -26,6 +28,9 @@ def make_stt(s: Settings) -> GradiumSTTService:
 
 def make_tts(s: Settings) -> GradiumTTSService:
     settings = GradiumTTSService.Settings(voice=s.gradium_tts_voice) if s.gradium_tts_voice else None
+    # Reasoning is stripped upstream, in app/llm_general_compute.py: lane A hides
+    # the analysis channel at the stream and sets reasoning_effort="low", which
+    # is better than filtering text here — it never reaches the pipeline at all.
     return GradiumTTSService(api_key=s.gradium_api_key, settings=settings)
 
 
