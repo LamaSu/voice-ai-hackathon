@@ -13,54 +13,44 @@ We ship a live voice agent that notices a user getting confused mid-explanation,
 
 **Submission:** register on hackathon.new, link this repo (no repo, not judged), add a demo video or live demo plan. One submission per team; teams are 2–4 people. Deadline **6:00 PM sharp**. The repo must be public by then.
 
-## DO THIS NOW — 17:10, handoff to @akashatnitr / claude-jev
+## 🔴 MERGE EVERYTHING — 17:37, and the repo is already public
 
-rg has asked claude-jev to run these, in order, on the machine with the keys. **rg has authorised
-the merge** (rule 5 normally reserves it for the lane owner — this is his call, not an agent
-self-authorising).
+**Every improvement made today is stranded on a branch. `main` is what judges see, and it has
+none of it.** This is now the only thing that matters.
+
+I dry-ran all three against `main`, individually and stacked. **All clean, zero conflicts** —
+@Manjotpahwa's earlier conflict cleared when they merged `main` in. The fully-merged tree passes
+**155 backend + 42 frontend tests, build clean.**
 
 ```bash
-# 1. Merge PR #24 — verified clean against main: 0 conflicts, 124 backend + 25 frontend passing
-gh pr merge 24 --merge --repo LamaSu/voice-ai-hackathon
-
-# 2. ***THE ONE ONLY YOU CAN RUN*** — renders the 3 repair questions to WAV.
-#    Needs the Gradium key, which is on your machine and nowhere else: the lane D
-#    agent has no key and its egress proxy blocks the provider outright (verified,
-#    not assumed). Three short clips, well under a cent. Must come AFTER the merge,
-#    because the script only learned about the probe list in #24.
-git pull && cd backend && uv run python scripts/make_fillers.py
-
-# 3. Go/no-go before the run
-cd .. && ./scripts/preflight.sh --live
+gh pr merge 25 --merge --repo LamaSu/voice-ai-hackathon   # lane A: reasoning fix, gaze gating, transcript
+gh pr merge 24 --merge --repo LamaSu/voice-ai-hackathon   # lane D: repair loop, probes, telemetry
+gh pr merge 22 --merge --repo LamaSu/voice-ai-hackathon   # lane C: prosody into confusion_p
 ```
 
-> **On step 2 specifically.** The probe currently pays live TTS, so there is **~0.4–1 s of silence
-> between the agent noticing the listener is lost and saying anything about it** — sitting exactly on
-> the beat the whole demo is built around. Pre-rendered, it lands instantly, the same trick the
-> fillers already use. Nothing breaks if it is skipped (the controller falls back to synthesis, and
-> that path is tested); it is just slow on the one moment we least want to be slow. The probe event
-> records `prerendered: true|false`, so the telemetry will not quietly conflate the two.
+Order does not matter. Merging fewer than all three leaves working, tested features undemoable.
 
-**Do not start a rehearsal against the current `main`.** Without #24 the agent reads its own
-reasoning aloud, and the confusion repair — the behaviour we are demoing — never fires at all.
+### What each one is worth, and what is lost without it
 
-### Why each step matters
-
-| Step | Without it |
+| PR | Without it, on stage |
 | --- | --- |
-| Merge #24 | The agent narrates its chain of thought, and never notices confusion or repairs |
-| `make_fillers.py` | The probe still works but pays ~0.4–1 s of TTS at the demo's most important moment |
-| `preflight.sh --live` | We find out on stage instead of backstage |
+| **#25** lane A | The agent **reads its own chain of thought aloud**. Also loses gaze-gated turn-taking and the double-transcript fix. |
+| **#24** lane D | The agent **never notices confusion and never repairs** — the behaviour this project is named for. The repair loop was built in #19 and never wired; `probes.py` was dead code until this PR. |
+| **#22** lane C | `confusion_p` stays face-only. Prosody (pause, rate, pitch) never reaches the trigger, so the demo's hesitation cue is weaker than it should be. |
 
-### Then, if there is time
+### After merging, in order
 
-- Re-run `scripts/latency_check.py --trials 9` close to judging. Our two TTFT measurements
-  disagree about which model is faster and they move with provider load; quoting an hour-old
-  number is a risk.
-- Run `scripts/where_time_goes.py` on the real `metrics.jsonl` before attempting any further
-  latency work. Thirty seconds, and it names the top row instead of us guessing.
-- **#15 is still unanswered after three model changes.** No agent can close it. Someone has to ask
-  General Compute, in writing, whether the model we are running is served on SN40/SN50.
+1. `cd backend && uv run ruff check --fix .` — merging #24 and #25 leaves one duplicate
+   `TTSSpeakFrame` import; we both added it. Lint only, but it is 5 seconds.
+2. `uv run python scripts/make_fillers.py` — **@akashatnitr only**; needs the Gradium key. Renders
+   the 3 probe clips, removing ~0.4–1 s of silence from the repair moment. Safe to skip: the
+   fallback synthesises.
+3. `./scripts/preflight.sh --live` — go/no-go before any run.
+
+### Still unanswered, and no agent can close it
+
+**#15 — is the model we are actually running served on SN40/SN50?** We have shipped on three
+different models today and confirmed nothing. This is the eligibility gate.
 
 ## Status board — 16:55, Sat Sept 19
 
