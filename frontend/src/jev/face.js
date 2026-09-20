@@ -45,7 +45,7 @@ function faceArea(lm) {
   return (maxX - minX) * (maxY - minY);
 }
 
-export function startFaceTracking({ video, overlay, readout, send, sendFaces }) {
+export function startFaceTracking({ video, overlay, readout, send, sendFaces, audio }) {
   const ctx = overlay.getContext("2d");
   const draw = new DrawingUtils(ctx);
   const startedAt = performance.now();
@@ -185,6 +185,10 @@ export function startFaceTracking({ video, overlay, readout, send, sendFaces }) 
       row("wants turn", s ? (s.wants_turn ? "yes" : "no") : "—"),
       row("confusion_p", s ? s.confusion_p.toFixed(2) : "—"),
       row("brow_lower / lip_press Δ", s ? `${s.au.brow_lower.toFixed(2)} / ${s.au.lip_press.toFixed(2)}` : "—"),
+      row(
+        "prosody: pitch Δ / rate Δ / pause",
+        s ? `${s.prosody_delta.pitch.toFixed(1)}Hz / ${s.prosody_delta.rate.toFixed(2)} / ${s.prosody_delta.pause_ms.toFixed(0)}ms` : "—",
+      ),
       row("baseline", calib < CALIBRATION_MS ? `calibrating… ${Math.ceil((CALIBRATION_MS - calib) / 1000)}s` : "ready (deltas)"),
       row("user_state sent", sent),
     );
@@ -193,7 +197,7 @@ export function startFaceTracking({ video, overlay, readout, send, sendFaces }) 
 
   async function start() {
     readout.innerHTML = row("face tracking", "loading MediaPipe…");
-    const base = { video, onUserState, onResult, numFaces: MAX_FACES };
+    const base = { video, onUserState, onResult, audio, numFaces: MAX_FACES };
     try {
       tracker = await createGazeTracker({ ...base, wasmBaseUrl: LOCAL_WASM, modelAssetPath: LOCAL_MODEL });
     } catch (e) {

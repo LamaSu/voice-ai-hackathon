@@ -1,8 +1,8 @@
 import { extractAURaw } from "./blendshapes";
 import { BaselineTracker } from "./baseline";
 import { isGazeAway, NodDetector } from "./headPose";
-import { estimateConfusion, estimateWantsTurn } from "./confusion";
-import type { AURaw, RawFaceFrame, UserState } from "./types";
+import { estimateConfusion, estimateWantsTurn, ZERO_PROSODY } from "./confusion";
+import type { AURaw, ProsodyDelta, RawFaceFrame, UserState } from "./types";
 
 const DEFAULT_INTERVAL_MS = 100; // ~10 Hz, per Contract 1
 
@@ -15,7 +15,9 @@ export class UserStateSampler {
 
   // Returns a UserState when it's time to emit at the ~10Hz cadence, or
   // null when this frame should be dropped to stay near the target rate.
-  ingest(frame: RawFaceFrame): UserState | null {
+  // `prosody` (C3) is optional: callers without a mic track available yet
+  // just get face-only confusion_p, same as before C3 landed.
+  ingest(frame: RawFaceFrame, prosody: ProsodyDelta = ZERO_PROSODY): UserState | null {
     if (frame.t_ms - this.lastEmitMs < this.intervalMs) return null;
     this.lastEmitMs = frame.t_ms;
 
@@ -26,7 +28,7 @@ export class UserStateSampler {
         gaze_away: true,
         nod: 0,
         wants_turn: false,
-        prosody_delta: { pitch: 0, rate: 0, pause_ms: 0 },
+        prosody_delta: prosody,
         confusion_p: 0,
       };
     }
@@ -46,9 +48,8 @@ export class UserStateSampler {
       gaze_away: gazeAway,
       nod,
       wants_turn: estimateWantsTurn(auDelta.mouth_open, gazeAway),
-      // Audio-derived; stub until C3 (prosody fusion) lands.
-      prosody_delta: { pitch: 0, rate: 0, pause_ms: 0 },
-      confusion_p: estimateConfusion(au, gazeAway),
+      prosody_delta: prosody,
+      confusion_p: estimateConfusion(au, gazeAway, prosody),
     };
   }
 

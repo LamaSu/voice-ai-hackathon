@@ -4,6 +4,7 @@ import {
   type FaceLandmarkerResult,
 } from "@mediapipe/tasks-vision";
 import { matrixToEulerDeg } from "./headPose";
+import { ProsodySampler } from "./prosody";
 import { UserStateSampler } from "./sampler";
 import type { RawFaceFrame, UserState } from "./types";
 
@@ -21,6 +22,11 @@ export interface GazeTrackerOptions {
   // Optional (added by lane A for the on-screen landmark/gaze overlay): the raw
   // per-frame MediaPipe result and derived head pose. Stays in the browser.
   onResult?: (result: FaceLandmarkerResult, frame: RawFaceFrame) => void;
+  // Optional (C3, #10): the same mic track the call already opened, for
+  // vocal-prosody fusion into confusion_p. Read-only — this never plays the
+  // audio back or opens a second getUserMedia call. Omit it (or pass a
+  // falsy value) to keep face-only behavior.
+  audio?: MediaStreamTrack | MediaStream | null;
   wasmBaseUrl?: string;
   modelAssetPath?: string;
   // How many faces to track (lane A: the room can hold more than one person).
@@ -73,6 +79,22 @@ export async function createGazeTracker(opts: GazeTrackerOptions): Promise<GazeT
   });
 
   const sampler = new UserStateSampler();
+
+  let prosodySampler: ProsodySampler | null = null;
+  let audioCtx: AudioContext | null = null;
+  let analyser: AnalyserNode | null = null;
+  let pcmBuffer: Float32Array<ArrayBuffer> | null = null;
+  if (opts.audio) {
+    audioCtx = new AudioContext();
+    const stream = opts.audio instanceof MediaStreamTrack ? new MediaStream([opts.audio]) : opts.audio;
+    const source = audioCtx.createMediaStreamSource(stream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    source.connect(analyser); // analysis only — never connected to a destination, so it's silent
+    pcmBuffer = new Float32Array(analyser.fftSize);
+    prosodySampler = new ProsodySampler();
+  }
+
   let stopped = false;
   let rafId = 0;
 
@@ -83,7 +105,14 @@ export async function createGazeTracker(opts: GazeTrackerOptions): Promise<GazeT
       const result = landmarker.detectForVideo(opts.video, t_ms);
       const frame = toRawFaceFrame(t_ms, result);
       opts.onResult?.(result, frame);
-      const state = sampler.ingest(frame);
+
+      let prosody;
+      if (analyser && pcmBuffer && prosodySampler && audioCtx) {
+        analyser.getFloatTimeDomainData(pcmBuffer);
+        prosody = prosodySampler.ingest(t_ms, pcmBuffer, audioCtx.sampleRate);
+      }
+
+      const state = sampler.ingest(frame, prosody);
       if (state) opts.onUserState(state);
     }
     rafId = requestAnimationFrame(loop);
@@ -95,6 +124,7 @@ export async function createGazeTracker(opts: GazeTrackerOptions): Promise<GazeT
       stopped = true;
       cancelAnimationFrame(rafId);
       landmarker.close();
+      audioCtx?.close();
     },
   };
 }
