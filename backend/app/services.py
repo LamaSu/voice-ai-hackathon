@@ -8,13 +8,16 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transcriptions.language import Language
 
 from app.config import Settings
+from app.reasoning_filter import ReasoningFilter
 
 BOT_NAME = "Jev"
 
 SYSTEM_PROMPT = """You are Jev, a friendly voice assistant in a live conversation.
 Replies are spoken: 1-2 short sentences, no lists, no markdown, no emojis.
 The system prompt names who is speaking; greet people by name when you know it.
-If interrupted, don't repeat yourself — answer the interruption."""
+If interrupted, don't repeat yourself — answer the interruption.
+Answer directly. Never narrate your reasoning, plan aloud, or describe what you
+are about to do — say only the reply itself."""
 
 
 def make_stt(s: Settings) -> GradiumSTTService:
@@ -26,7 +29,13 @@ def make_stt(s: Settings) -> GradiumSTTService:
 
 def make_tts(s: Settings) -> GradiumTTSService:
     settings = GradiumTTSService.Settings(voice=s.gradium_tts_voice) if s.gradium_tts_voice else None
-    return GradiumTTSService(api_key=s.gradium_api_key, settings=settings)
+    return GradiumTTSService(
+        api_key=s.gradium_api_key,
+        settings=settings,
+        # gpt-oss-120b streams its chain of thought inline in <think> tags, and
+        # without this the agent reads its own reasoning out loud.
+        text_filters=[ReasoningFilter()],
+    )
 
 
 def make_llm(s: Settings) -> OpenAILLMService:
