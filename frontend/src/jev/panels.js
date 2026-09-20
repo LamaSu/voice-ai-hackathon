@@ -327,6 +327,23 @@ export function mountJevPanels(client, root) {
           logLine(txt, ACTION_CLASS[ev.event === "backchannel" ? "continue" : ev.event] || "");
         }
         break;
+      case "transcript":
+        if (ev.role === "user_ignored") {
+          // speech the agent deliberately didn't answer: show it, greyed, with why
+          const li = el("li", "log-ignored");
+          li.append(el("span", "who", speakers.user || "you"));
+          const what = el("span", "what");
+          what.append(el("span", "ignored-text", ev.text));
+          what.append(el("span", "ignored-why", ` — ignored, ${ev.reason}`));
+          li.append(what);
+          const log = document.getElementById("log");
+          if (log) {
+            log.append(li);
+            log.scrollTop = log.scrollHeight;
+          }
+          logLine(`ignored: “${ev.text}” (${ev.reason})`, "act-drop");
+        }
+        break;
       case "memory":
         renderMemory(ev);
         break;

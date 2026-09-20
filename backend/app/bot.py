@@ -137,7 +137,9 @@ def build_session(
 
     def refresh_system_prompt(speaker_label: str | None, note: str | None = None) -> None:
         block = memory.prompt_block()
-        who = memory.display_name(speaker_label)
+        # only a real name: "S2" is an internal label and the LLM will happily say it out loud
+        person = memory.people.get(speaker_label) if speaker_label else None
+        who = person.name if person and person.name else None
         parts = [SYSTEM_PROMPT]
         if block:
             parts.append(block)
@@ -283,7 +285,12 @@ def build_session(
 
         async def update_memory():
             if await shared.memory_llm.update(memory, label, user_text, text):
+                if label and engine.state.speaker.label == label:
+                    learned = memory.people.get(label)
+                    if learned and learned.name:
+                        engine.state.speaker.name = learned.name
                 await publish_memory()
+                await engine.publish_snapshot(force=True)
 
         asyncio.create_task(update_memory())
 

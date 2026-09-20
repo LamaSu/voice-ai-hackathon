@@ -516,3 +516,92 @@ async def test_task_turn_always_gets_an_instant_receipt():
     )
     assert fillers.picked == ["acknowledging"]
     assert [f for f in down if isinstance(f, SpeechOutputAudioRawFrame)]
+
+
+def looking_away(engine, faces=2, looking=0):
+    """Pretend lane C's camera telemetry just arrived."""
+    v = engine.state.vision
+    v.enabled = True
+    v.face_count = faces
+    v.faces_looking_at_agent = looking
+    v.face_present = faces > 0
+    v.updated_at = engine.now()
+
+
+async def test_speech_is_ignored_when_nobody_looks_at_the_agent():
+    ctrl, engine, events = make()
+    looking_away(engine)
+    down, _ = await run_test(
+        ctrl,
+        frames_to_send=[
+            VADUserStartedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            tr("So then I told him the whole thing was off."),
+            SleepFrame(0.3),
+        ],
+    )
+    assert names(down) == [], "answered speech that was aimed at someone else"
+    ignored = [e for e in events if e["type"] == "transcript" and e["role"] == "user_ignored"]
+    assert ignored and ignored[0]["text"] == "So then I told him the whole thing was off."
+    assert "looking" in ignored[0]["reason"]
+
+
+async def test_looking_at_the_agent_is_answered_normally():
+    ctrl, engine, events = make()
+    looking_away(engine, faces=2, looking=1)  # one of them is looking
+    down, _ = await run_test(
+        ctrl,
+        frames_to_send=[
+            VADUserStartedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            tr("What's the weather tomorrow?"),
+            SleepFrame(0.3),
+        ],
+    )
+    assert names(down)[-1] == "ProposedUserStoppedSpeakingFrame"
+
+
+async def test_stale_gaze_data_does_not_deafen_the_agent():
+    ctrl, engine, events = make()
+    looking_away(engine)
+    engine.state.vision.updated_at = engine.now() - 30  # camera stopped sending a while ago
+    down, _ = await run_test(
+        ctrl,
+        frames_to_send=[
+            VADUserStartedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            tr("What's the weather tomorrow?"),
+            SleepFrame(0.3),
+        ],
+    )
+    assert names(down)[-1] == "ProposedUserStoppedSpeakingFrame"
+
+
+async def test_room_talk_does_not_interrupt_the_bot():
+    ctrl, engine, events = make()
+    looking_away(engine)
+    down, _ = await run_test(
+        ctrl,
+        frames_to_send=[
+            BotStartedSpeakingFrame(),
+            VADUserStartedSpeakingFrame(),
+            interim("no I said Saturday"),  # FakeJev calls this an interrupt
+            SleepFrame(0.3),
+        ],
+    )
+    assert "InterruptionFrame" not in names(down), "room talk stopped the bot"
+
+
+async def test_hard_stop_still_works_when_nobody_is_looking():
+    ctrl, engine, events = make()
+    looking_away(engine)
+    down, _ = await run_test(
+        ctrl,
+        frames_to_send=[
+            BotStartedSpeakingFrame(),
+            VADUserStartedSpeakingFrame(),
+            interim("stop"),
+            SleepFrame(0.3),
+        ],
+    )
+    assert "InterruptionFrame" in names(down), "'stop' must always stop the bot"

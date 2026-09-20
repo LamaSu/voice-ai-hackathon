@@ -50,6 +50,11 @@ class PolicyConfig:
     filler_none_max: float = 0.6
     filler_min_prob: float = 0.15
     task_conf: float = 0.55  # spinning up an agent is visible, so only on a confident read
+    # Gaze gating: with a camera on and faces visible, speech from people who are all looking
+    # away is treated as talk in the room, not a query. Stale telemetry disables the gate --
+    # a frozen "looking away" must never deafen the agent.
+    require_gaze: bool = True
+    gaze_stale_s: float = 2.0
     confusion_threshold: float = 0.6  # confusion_p (Contract 1) at/above this counts as "high"
     confusion_confirm_samples: int = 3  # consecutive high samples (~300ms at 10Hz) before acting
 
@@ -161,6 +166,28 @@ def choose_filler(r: JevResult | None, cfg: PolicyConfig = PolicyConfig()) -> st
         return None
     category, p = max(((k, v) for k, v in probs.items() if k != "none"), key=lambda kv: kv[1], default=(None, 0.0))
     return category if p >= cfg.filler_min_prob else None
+
+
+def gaze_blocks_turn(
+    *,
+    enabled: bool,
+    face_count: int,
+    looking_count: int,
+    age_s: float | None,
+    cfg: PolicyConfig = PolicyConfig(),
+) -> bool:
+    """True when the camera can see people and none of them are looking at the agent.
+
+    Returns False whenever we can't tell: gate off, no camera data, no face in frame, or
+    telemetry older than `gaze_stale_s`. Not knowing is not a reason to ignore someone.
+    """
+    if not cfg.require_gaze or not enabled:
+        return False
+    if age_s is None or age_s > cfg.gaze_stale_s:
+        return False
+    if face_count <= 0:
+        return False
+    return looking_count <= 0
 
 
 def choose_task(r: JevResult | None, cfg: PolicyConfig = PolicyConfig()) -> str | None:

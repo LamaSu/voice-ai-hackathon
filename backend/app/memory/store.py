@@ -208,20 +208,31 @@ class MemoryLLM:
             )
             try:
                 data = await self._json(
-                    "You maintain memory for a voice assistant. Given the previous summary, known people and "
-                    "the newest exchange, return JSON with keys: "
-                    '"summary" (<= 80 words, third person, keep important details from before; refer to people '
-                    "by name or they/them only: never use he, she, him, her, his, hers, himself, herself), "
-                    '"new_facts" (object mapping speaker_label -> list of NEW short durable facts about that '
-                    "person, e.g. preferences, plans, relationships; empty if none). Facts start with the "
-                    "person's name (never he/she/him/her/his/hers) and must be about the person's life, not about this "
-                    "conversation, the assistant, name spelling, or transcription. Do not repeat known facts.",
+                    "You maintain memory for a voice assistant. Given the previous summary, the known "
+                    "people and the newest exchange, return JSON with exactly these three keys:\n"
+                    '1. "summary": <= 80 words, third person, keeping what mattered from before. Refer to '
+                    "people by name or they/them only — never he, she, him, her, his or hers.\n"
+                    '2. "speaker_name": the OWN name of the person speaking in new_exchange, if this '
+                    "exchange makes it clear (they introduced themselves, the assistant addressed them by "
+                    "name and they went along with it, or someone called them by name). null when unsure. "
+                    "Never the name of a third person they merely mentioned.\n"
+                    '3. "new_facts": object mapping speaker_label -> list of NEW short durable facts about '
+                    "that person (preferences, plans, relationships). Each fact starts with their name, is "
+                    "about their life rather than this conversation or the assistant, and is not already known.",
                     prompt,
                 )
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"memory update failed: {e}")
                 return False
             store.summary = str(data.get("summary") or store.summary)[:800]
+            # Names learned from context, not only from an explicit "my name is X"
+            name = str(data.get("speaker_name") or "").strip()
+            if speaker_label and name and len(name) < 40:
+                person = store.person(speaker_label)
+                restated = (regex_name(user_text) or "").lower() == name.lower()
+                if (not person.name or restated) and person.name != name:
+                    logger.info(f"memory: {speaker_label} is {name} (from context)")
+                    person.name = name
             for label, facts in (data.get("new_facts") or {}).items():
                 if label in store.people and isinstance(facts, list):
                     p = store.people[label]

@@ -147,6 +147,23 @@ the agent plays a short cached reaction — "Hmm.", "Got it.", "Give me a sec." 
 
   Set `ENABLE_FILLERS=0` to turn them off.
 
+## Gaze gating: speech nobody aimed at the agent
+
+With a camera running, the agent stays out of conversations that aren't with it.
+
+- **Rule** (`gaze_blocks_turn`): if faces are in frame and **none** of them are looking at the agent,
+  the turn is dropped instead of answered, and an overlap does not interrupt the bot.
+- **Not knowing is not a reason to ignore someone.** The gate is off whenever we can't tell: no
+  camera, no face in frame, or telemetry older than 2 s. A frozen "looking away" must never deafen
+  the agent.
+- **Hard-stop words still work.** "Stop" interrupts whether or not anyone is looking.
+- **The UI shows what was ignored**, greyed out with the reason, rather than hiding it — otherwise a
+  gated agent is indistinguishable from a broken one.
+
+Verified end to end in `scripts/e2e_gaze.py`, which sends the same `faces` telemetry the browser does:
+speech ignored while everyone looks away, the same question answered when someone looks, and room
+talk failing to interrupt the bot.
+
 ## Background agents (telemetry widget)
 
 "Set a timer for ten seconds", "what's Apple trading at", "what was the score" — work the
@@ -179,6 +196,11 @@ real price in about 2 s.
     window, and a roomful of half-heard voices costs latency on the turn-taking path.
   - Live: `score_existing` every 0.4 s during speech.
   - Final: `classify` on each whole utterance, which creates and updates the S1, S2, ... profiles.
+- **Names from context:** the memory pass after each exchange also returns `speaker_name` — the name
+  of the person speaking, when the exchange makes it clear. That covers a self-introduction, the
+  agent addressing them ("Great, Simone — I'll book it"), or someone in the room using their name.
+  A third person merely mentioned ("I met Sarah yesterday") is not taken. An explicit "call me X"
+  overwrites an existing name; otherwise names are only filled in when unknown.
 - **People memory:** when Jev's `introducing_self` is at least 0.6, General Compute extracts the name as JSON and binds it to the active speaker profile. Profiles, names and facts are saved to `backend/data/memory.json`, so people are recognized in later sessions.
 - **Conversation memory:** after each exchange, General Compute updates a rolling summary plus facts per person in the background. That memory goes into the LLM system prompt.
 

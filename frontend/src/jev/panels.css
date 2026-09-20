@@ -108,3 +108,8 @@ button.danger:disabled { opacity: 0.5; cursor: default; }
 .agent-running .agent-time { color: var(--fair); }
 .agent-result { font-size: 12px; margin-top: 5px; line-height: 1.45; }
 .agent-result.muted { color: var(--muted); }
+
+/* speech the agent deliberately ignored (nobody looking at it) */
+.log-ignored { opacity: 0.55; }
+.log-ignored .ignored-text { color: var(--muted); font-style: italic; }
+.log-ignored .ignored-why { color: var(--muted); font-size: 11px; }

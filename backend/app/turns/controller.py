@@ -49,11 +49,12 @@ from app.turns.policy import (
     PolicyConfig,
     choose_filler,
     choose_task,
-    sustained_overlap_interrupt,
     decide_end_of_turn,
     decide_overlap,
+    gaze_blocks_turn,
     is_hard_stop,
     is_introduction,
+    sustained_overlap_interrupt,
 )
 
 OVERLAP_MIN_INTERVAL_S = 0.15
@@ -496,6 +497,9 @@ class InteractionController(FrameProcessor):
             await self._end_overlap(discard=True)
 
     async def _apply_overlap(self, d: Decision, r: JevResult | None, text: str) -> None:
+        if d.action == Action.INTERRUPT and d.reason != "hard_stop_phrase" and self._gaze_blocks():
+            # people talking to each other in the room shouldn't stop the agent mid-sentence
+            d = Decision(Action.CONTINUE, "nobody_looking_at_agent")
         if d.action == Action.INTERRUPT and self._overlap_resolved != Action.INTERRUPT:
             self._overlap_resolved = Action.INTERRUPT
             await self._interrupt(d.reason, text)
@@ -572,14 +576,19 @@ class InteractionController(FrameProcessor):
                 return  # user resumed while we were asking, or already answered from interim
             silence_s = self._now() - (self.s.user.speech_stopped_at or self._now())
             d = decide_end_of_turn(r, text=text, silence_s=silence_s, cfg=self._cfg)
+            if d.action == Action.RESPOND and self._gaze_blocks():
+                d = Decision(Action.DROP, "nobody_looking_at_agent")
             await self._publish_jev("end_of_turn", r, d, text)
             if d.action == Action.RESPOND:
                 await self._respond(text, r)
             elif d.action == Action.DROP:
-                self._held.clear()
-                await self._turn_event("drop", text=text, reason=d.reason)
-                if not self._turn_open:
-                    self._engine.set_phase(Phase.IDLE)
+                if d.reason == "nobody_looking_at_agent":
+                    await self._ignore_turn(text, "end_of_turn")
+                else:
+                    self._held.clear()
+                    await self._turn_event("drop", text=text, reason=d.reason)
+                    if not self._turn_open:
+                        self._engine.set_phase(Phase.IDLE)
             else:  # HOLD
                 await self._turn_event("hold", text=text, reason=d.reason)
                 self._cancel("_hold_task")
@@ -603,6 +612,12 @@ class InteractionController(FrameProcessor):
             self._spec = (utt, _norm(text), _done(r))
             silence_s = self._now() - (self.s.user.speech_stopped_at or self._now())
             d = decide_end_of_turn(r, text=text, silence_s=silence_s, cfg=self._cfg)
+            if d.action == Action.RESPOND and self._gaze_blocks():
+                await self._publish_jev(
+                    "end_of_turn", r, Decision(Action.DROP, "nobody_looking_at_agent@interim"), text
+                )
+                await self._ignore_turn(text, "end_of_turn@interim")
+                return
             if d.action == Action.RESPOND:
                 await self._publish_jev("end_of_turn", r, Decision(d.action, d.reason + "@interim"), text)
                 self._answered_utt = utt
@@ -621,6 +636,11 @@ class InteractionController(FrameProcessor):
         if not text:
             return
         d = decide_end_of_turn(None, text=text, silence_s=self._cfg.hold_max_silence_s, cfg=self._cfg)
+        if self._gaze_blocks():
+            d = Decision(Action.DROP, "nobody_looking_at_agent")
+            await self._publish_jev("end_of_turn", None, d, text)
+            await self._ignore_turn(text, "hold_timeout")
+            return
         await self._publish_jev("end_of_turn", None, d, text)
         await self._respond(text, None)
 
@@ -697,6 +717,35 @@ class InteractionController(FrameProcessor):
             "interaction", event="filler", category=category, text=clip.text,
             duration_s=round(clip.duration_s, 2), speaker=self.s.speaker.name or self.s.speaker.label,
         )
+
+    def _gaze_blocks(self) -> bool:
+        """Nobody in frame is looking at the agent: treat speech as talk in the room."""
+        v = self.s.vision
+        age = (self._now() - v.updated_at) if v.updated_at else None
+        return gaze_blocks_turn(
+            enabled=v.enabled,
+            face_count=v.face_count,
+            looking_count=v.faces_looking_at_agent,
+            age_s=age,
+            cfg=self._cfg,
+        )
+
+    async def _ignore_turn(self, text: str, where: str) -> None:
+        """Drop speech nobody aimed at the agent, and show it greyed out rather than hiding it."""
+        self._held.clear()
+        self.s.user.partial_transcript = ""
+        self._answered_utt = self._utt
+        await self._engine.publish(
+            "transcript",
+            role="user_ignored",
+            text=text,
+            reason="nobody is looking at the agent",
+            where=where,
+            speaker=self.s.speaker.name or self.s.speaker.label,
+        )
+        await self._turn_event("ignored_not_looking", text=text)
+        if self.s.phase == Phase.LISTENING:
+            self._engine.set_phase(Phase.IDLE)
 
     def _conversation_is_idle(self) -> bool:
         """A gap: nobody is speaking, no turn is open, and no answer is on its way."""
