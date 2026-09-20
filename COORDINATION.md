@@ -1,4 +1,4 @@
-# 3Jevvs — team & agent coordination
+# 3Jeffs — team & agent coordination
 
 Source of truth for humans and agents. Tasks and blockers live in **GitHub Issues**; everything else lives here. Changes to this file go through a PR like any other change.
 

@@ -1,4 +1,4 @@
-# 3Jevvs
+# 3Jeffs
 
 **A confusion-aware voice agent.**
 
