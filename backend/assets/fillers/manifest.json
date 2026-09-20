@@ -114,7 +114,7 @@
    "category": "acknowledging",
    "text": "Mm-hm.",
    "file": "acknowledging--mm-hm.wav",
-   "duration_s": 1.84
+   "duration_s": 1.36
   },
   {
    "category": "acknowledging",
@@ -295,6 +295,24 @@
    "text": "Listen...",
    "file": "casual--listen.wav",
    "duration_s": 1.2
+  },
+  {
+   "category": "probe",
+   "text": "Which part should I go over again?",
+   "file": "probe--which-part-should-i-go-over-again.wav",
+   "duration_s": 1.84
+  },
+  {
+   "category": "probe",
+   "text": "Want me to slow down, or go over something specific?",
+   "file": "probe--want-me-to-slow-down-or-go-over-somethin.wav",
+   "duration_s": 3.12
+  },
+  {
+   "category": "probe",
+   "text": "Still with me, or should I back up?",
+   "file": "probe--still-with-me-or-should-i-back-up.wav",
+   "duration_s": 2.32
   }
  ]
 }

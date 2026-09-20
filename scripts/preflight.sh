@@ -12,6 +12,16 @@
 # Exit code 0 means go. Anything else, read the FAIL lines.
 set -uo pipefail
 
+# `timeout` is GNU coreutils and absent on macOS, where this is run on demo day. Use
+# gtimeout when present, otherwise run the command unbounded rather than failing rc=127.
+run_limited() {
+  local secs="$1"; shift
+  if command -v timeout >/dev/null 2>&1; then timeout "$secs" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$secs" "$@"
+  else "$@"
+  fi
+}
+
 cd "$(dirname "$0")/.."
 LIVE=0
 [[ "${1:-}" == "--live" ]] && LIVE=1
@@ -26,7 +36,7 @@ head_ "Secrets"
 if [[ -f .env ]]; then
   ok ".env exists"
   # Presence only. Never print a key, not even a prefix (CLAUDE.md rule 10).
-  for k in GRADIUM_API_KEY GENERAL_COMPUTE_API_KEY; do
+  for k in GRADIUM_API_KEY GENERAL_COMPUTE; do
     if grep -qE "^${k}=.+" .env; then ok "$k is set"; else bad "$k is missing or empty"; fi
   done
   if grep -qE "^(JEV_API_KEY|TYPESAFE_API_KEY)=.+" .env; then
@@ -72,7 +82,7 @@ if [[ -e /dev/video0 ]]; then ok "camera device present"; else note "no /dev/vid
 head_ "Providers"
 # smoke_providers.py reports per-provider failures in its output but still exits 0,
 # so the exit code alone would call a dead provider healthy. Read the output.
-(cd backend && timeout 90 uv run python scripts/smoke_providers.py >/tmp/preflight-smoke.log 2>&1)
+(cd backend && run_limited 90 uv run python scripts/smoke_providers.py >/tmp/preflight-smoke.log 2>&1)
 smoke_rc=$?
 if grep -qiE "fail|error|traceback" /tmp/preflight-smoke.log; then
   bad "a provider is down — keys, venue wifi, or Gradium credits:"
@@ -88,7 +98,7 @@ if [[ $LIVE -eq 1 ]]; then
   head_ "End to end (bot must already be running)"
   if curl -sS -o /dev/null -m 5 http://127.0.0.1:7860/ 2>/dev/null; then
     ok "bot answering on :7860"
-    if (cd backend && timeout 180 uv run python scripts/e2e_webrtc.py >/tmp/preflight-e2e.log 2>&1); then
+    if (cd backend && run_limited 180 uv run python scripts/e2e_webrtc.py >/tmp/preflight-e2e.log 2>&1); then
       ok "WebRTC e2e passed (intro, backchannel, barge-in, second speaker)"
     else
       bad "WebRTC e2e failed — see /tmp/preflight-e2e.log"
