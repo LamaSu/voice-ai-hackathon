@@ -43,6 +43,9 @@ class Settings:
     host: str = os.getenv("HOST", "127.0.0.1")
     port: int = int(os.getenv("PORT", "7860"))
     enable_speaker_id: bool = os.getenv("ENABLE_SPEAKER_ID", "1") == "1"
+    # Feed the listener's live face signals to the reasoner so it can adapt the
+    # wording, not just decide when to stop. ENABLE_LISTENER_NOTE=0 to disable.
+    enable_listener_note: bool = os.getenv("ENABLE_LISTENER_NOTE", "1") == "1"
     # Cached spoken fillers ("Hmm", "Got it") played while the LLM generates
     enable_fillers: bool = os.getenv("ENABLE_FILLERS", "1") == "1"
 

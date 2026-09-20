@@ -13,44 +13,44 @@ We ship a live voice agent that notices a user getting confused mid-explanation,
 
 **Submission:** register on hackathon.new, link this repo (no repo, not judged), add a demo video or live demo plan. One submission per team; teams are 2–4 people. Deadline **6:00 PM sharp**. The repo must be public by then.
 
-## 🔴 MERGE EVERYTHING — 17:37, and the repo is already public
+## Closing the loop — 18:40
 
-**Every improvement made today is stranded on a branch. `main` is what judges see, and it has
-none of it.** This is now the only thing that matters.
+Everything merged: #22, #24, #25, #26. `main` is `665aff4`, **154 passing**, and
+`preflight --live` reported **GO** on the demo machine. The repo is public.
 
-I dry-ran all three against `main`, individually and stacked. **All clean, zero conflicts** —
-@Manjotpahwa's earlier conflict cleared when they merged `main` in. The fully-merged tree passes
-**155 backend + 42 frontend tests, build clean.**
+### Last gap, now fixed (PR #27): the face never reached the reasoner
 
-```bash
-gh pr merge 25 --merge --repo LamaSu/voice-ai-hackathon   # lane A: reasoning fix, gaze gating, transcript
-gh pr merge 24 --merge --repo LamaSu/voice-ai-hackathon   # lane D: repair loop, probes, telemetry
-gh pr merge 22 --merge --repo LamaSu/voice-ai-hackathon   # lane C: prosody into confusion_p
-```
+The face could already **stop** the agent (`decide_probe`) and tell Jev whether it was being
+addressed. But the model *writing the reply* had never seen a single face signal — the LLM system
+prompt was built from the memory block, who is speaking, and a background-job note, and nothing
+else. So the agent could notice you were lost and then re-explain **identically**. Half the idea.
 
-Order does not matter. Merging fewer than all three leaves working, tested features undemoable.
+`app/listener_note.py` turns the live `VisionState` into one short line appended to the system
+prompt. What the model actually receives:
 
-### What each one is worth, and what is lost without it
+> Live read on the listener: the person you are talking to is showing strong signs of being lost
+> and has looked away. Therefore: back up to the last point they clearly had, re-explain it a
+> different way with a concrete example, and keep it to two sentences. Do not mention their face,
+> expression or body language, and do not ask whether they are confused — just adjust how you
+> explain.
 
-| PR | Without it, on stage |
-| --- | --- |
-| **#25** lane A | The agent **reads its own chain of thought aloud**. Also loses gaze-gated turn-taking and the double-transcript fix. |
-| **#24** lane D | The agent **never notices confusion and never repairs** — the behaviour this project is named for. The repair loop was built in #19 and never wired; `probes.py` was dead code until this PR. |
-| **#22** lane C | `confusion_p` stays face-only. Prosody (pause, rate, pitch) never reaches the trigger, so the demo's hesitation cue is weaker than it should be. |
+Three decisions worth knowing:
 
-### After merging, in order
+- **The agent may never mention the face.** "You look confused" is leading, invites a reflexive
+  "no, I'm fine", and is exactly the emotion-detection claim we disowned in §2 of the architecture.
+  The signal changes *how* it explains, never what it claims to know about you.
+- **Guidance, not telemetry.** `brow_lower 0.42` is useless to a model mid-sentence; "slow down and
+  use a concrete example" is actionable.
+- **Silence when there is nothing to say.** A calm listener produces no note, and a reading older
+  than 2 s is dropped — a frozen value describes a moment that has passed. Prompt tokens are
+  time-to-first-token.
 
-1. `cd backend && uv run ruff check --fix .` — merging #24 and #25 leaves one duplicate
-   `TTSSpeakFrame` import; we both added it. Lint only, but it is 5 seconds.
-2. `uv run python scripts/make_fillers.py` — **@akashatnitr only**; needs the Gradium key. Renders
-   the 3 probe clips, removing ~0.4–1 s of silence from the repair moment. Safe to skip: the
-   fallback synthesises.
-3. `./scripts/preflight.sh --live` — go/no-go before any run.
+`ENABLE_LISTENER_NOTE=0` turns it off if it misbehaves in a run.
 
-### Still unanswered, and no agent can close it
+### Still open, and no agent can close it
 
-**#15 — is the model we are actually running served on SN40/SN50?** We have shipped on three
-different models today and confirmed nothing. This is the eligibility gate.
+**#15 — is the model we are running served on SN40/SN50?** Three model changes today, still
+unconfirmed. This was the eligibility gate all along.
 
 ## Status board — 16:55, Sat Sept 19
 

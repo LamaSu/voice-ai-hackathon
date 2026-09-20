@@ -35,6 +35,7 @@ from pydantic import ValidationError
 from app.config import BACKEND_DIR, Settings, get_settings
 from app.contracts import UserState
 from app.jev.client import JevClient, JevResult, NullJev
+from app.listener_note import listener_note
 from app.observers.latency_hud import LatencyHUD
 from app.fillers import FillerLibrary
 from app.tasks.runner import TaskRunner
@@ -150,6 +151,13 @@ def build_session(
             parts.append(block)
         if who:
             parts.append(f"The person speaking right now is {who}.")
+        # The face can already stop the agent and steer Jev; this is what lets it
+        # change the *words*. Without it the agent notices you are lost and then
+        # re-explains identically, which is the idea half-built.
+        if s.enable_listener_note:
+            live = listener_note(engine.state.vision, now=engine.now())
+            if live:
+                parts.append(live)
         if note:
             parts.append(note)
         msgs = context.get_messages()

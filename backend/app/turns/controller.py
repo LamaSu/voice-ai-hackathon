@@ -21,7 +21,6 @@ from loguru import logger
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     SpeechOutputAudioRawFrame,
-    TTSSpeakFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
