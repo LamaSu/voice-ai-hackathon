@@ -245,9 +245,10 @@ def build_session(
         params=PipelineParams(audio_in_sample_rate=16000, enable_metrics=True),
         idle_timeout_secs=None,
         observers=[latency_observer],
-        # The UI should only see user text the controller accepted as a turn, not raw Gradium
-        # interims/finals (backchannels, echo) — so the STT is an ignored RTVI source.
-        rtvi_observer_params=RTVIObserverParams(ignored_sources=[stt]),
+        # The observer reports every push, so a processor that re-emits text would be
+        # reported twice. The controller is the only source of user text (not raw Gradium
+        # interims/finals), and the reasoning filter is the only source of bot text.
+        rtvi_observer_params=RTVIObserverParams(ignored_sources=[stt, llm]),
     )
 
     async def send_to_client(event: dict[str, Any]) -> None:
