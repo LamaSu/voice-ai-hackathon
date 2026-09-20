@@ -103,6 +103,11 @@ def write_wav(path: Path, pcm, sample_rate: int) -> None:
 
 
 async def main() -> None:
+    # The repair questions are a fixed list, so cache them like fillers: paying
+    # TTS at the demo's most important moment would put ~0.4-1s of silence
+    # between noticing the listener is lost and saying so.
+    from app.turns.probes import PROBE_CANDIDATES
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--voice", default=None, help="Gradium voice id (default: the bot's voice)")
     ap.add_argument("--force", action="store_true", help="regenerate clips that already exist")
@@ -113,7 +118,9 @@ async def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
 
     manifest: dict = {"voice": voice, "sample_rate": gradium_raw.TTS_SAMPLE_RATE, "clips": []}
-    for category, phrases in CATALOG.items():
+    catalog = dict(CATALOG)
+    catalog["probe"] = tuple(c.question for c in PROBE_CANDIDATES)
+    for category, phrases in catalog.items():
         for text in phrases:
             name = f"{category}--{slug(text)}.wav"
             path = OUT / name

@@ -130,3 +130,45 @@ async def test_the_probe_is_announced_so_the_ui_and_log_can_show_it(ctrl):
     probes = [e for e in seen if e.get("event") == "probe"]
     assert probes and probes[0]["question"]
     assert probes[0]["confusion_p"] >= 0.8
+
+
+class OneProbeClip:
+    """A library holding a pre-rendered clip for the generic probe only."""
+
+    class _Clip:
+        pcm = b"\x00\x00" * 4800
+        sample_rate = 48000
+
+    def available(self) -> bool:
+        return True
+
+    def probe(self, question: str):
+        if question.strip().lower() == "which part should i go over again?":
+            return self._Clip()
+        return None
+
+
+async def test_a_prerendered_probe_plays_instantly_instead_of_paying_tts(ctrl):
+    # The repair is the demo's moment; synthesising it would put ~0.4-1s of
+    # silence between noticing and saying so.
+    ctrl._fillers = OneProbeClip()
+    speaking(ctrl)
+
+    pushed = await drive(ctrl, samples=12)
+    kinds = [type(f).__name__ for f in pushed]
+
+    assert "SpeechOutputAudioRawFrame" in kinds
+    assert "TTSSpeakFrame" not in kinds
+
+
+async def test_it_falls_back_to_synthesis_when_no_clip_exists(ctrl):
+    class NoClips(OneProbeClip):
+        def probe(self, question: str):
+            return None
+
+    ctrl._fillers = NoClips()
+    speaking(ctrl)
+
+    pushed = await drive(ctrl, samples=12)
+
+    assert [f for f in pushed if isinstance(f, TTSSpeakFrame)]

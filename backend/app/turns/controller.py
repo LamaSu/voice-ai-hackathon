@@ -559,9 +559,21 @@ class InteractionController(FrameProcessor):
         # Stop the explanation exactly as a barge-in would: same flush of LLM,
         # TTS and queued audio, so we never talk over ourselves.
         await self._interrupt("confusion_probe", candidate.question)
-        # Then ask, bypassing the LLM — the question is chosen, not generated,
-        # so it reaches the ear without another round trip.
-        await self.push_frame(TTSSpeakFrame(candidate.question))
+        # Then ask. The question is chosen from a fixed set, not generated, so
+        # it can be pre-rendered like the fillers and play immediately. That
+        # matters here more than anywhere: this is the demo's moment, and
+        # paying TTS for it would put ~0.4-1s of silence between noticing the
+        # listener is lost and saying so. Falls back to synthesis when the clip
+        # is missing, so a machine without rendered probes still works.
+        clip = self._fillers.probe(candidate.question) if self._fillers else None
+        if clip is not None:
+            await self.push_frame(
+                SpeechOutputAudioRawFrame(
+                    audio=clip.pcm, sample_rate=clip.sample_rate, num_channels=1
+                )
+            )
+        else:
+            await self.push_frame(TTSSpeakFrame(candidate.question))
         await self._engine.publish(
             "interaction",
             event="probe",
@@ -569,6 +581,7 @@ class InteractionController(FrameProcessor):
             question=candidate.question,
             hypotheses=sorted(candidate.hypotheses_covered),
             confusion_p=round(sample.confusion_p, 3),
+            prerendered=clip is not None,
         )
 
     # ------------------------------------------------------------------ actions

@@ -46,6 +46,7 @@ class FillerLibrary:
         self.by_category: dict[str, list[Filler]] = {}
         self.sample_rate = 48000
         self._last: dict[str, str] = {}
+        self._probes: dict[str, Filler] = {}
         manifest = directory / "manifest.json"
         if not manifest.exists():
             logger.warning(f"fillers: no manifest at {manifest}; run scripts/make_fillers.py")
@@ -61,7 +62,11 @@ class FillerLibrary:
                 rate = w.getframerate()
             pcm = self._tighten(pcm, rate)
             f = Filler(clip["category"], clip["text"], pcm.tobytes(), rate)
-            self.by_category.setdefault(clip["category"], []).append(f)
+            if clip["category"] == "probe":
+                # Keyed by text: the picker chooses a question, not a category.
+                self._probes[clip["text"].strip().lower()] = f
+            else:
+                self.by_category.setdefault(clip["category"], []).append(f)
         logger.info(
             f"fillers: {sum(len(v) for v in self.by_category.values())} clips in "
             f"{len(self.by_category)} categories"
@@ -80,6 +85,15 @@ class FillerLibrary:
 
     def available(self) -> bool:
         return bool(self.by_category)
+
+    def probe(self, question: str) -> Filler | None:
+        """A pre-rendered probe question, if one was generated for this text.
+
+        Probes come from a fixed list, so they can be cached exactly like
+        fillers. Returns None when the clip is absent and the caller should
+        fall back to synthesis.
+        """
+        return self._probes.get(question.strip().lower())
 
     def pick(self, category: str) -> Filler | None:
         clips = self.by_category.get(category)
